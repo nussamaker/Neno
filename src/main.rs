@@ -12,6 +12,7 @@ mod panel;
 mod settings;
 mod shelf;
 mod state;
+mod sysmon;
 mod todo;
 mod tray;
 mod water;
@@ -58,6 +59,10 @@ fn main() {
     if let Some(w) = weather::fetch_weather(51.5074, -0.1278) {
         notch::set_weather(&format!("{:.0}C {}", w.temperature, w.condition));
     }
+
+    // System monitor sample
+    let mut sm = sysmon::SystemMonitor::new();
+    notch::set_sysmon(&format!("CPU {:.0}% RAM {:.0}%", sm.cpu_usage, sm.ram_usage));
 
     if let Some(m) = media::MediaSession::current() {
         notch::set_media_title(&format!("{} — {}", m.title, m.artist));

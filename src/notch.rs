@@ -6,6 +6,8 @@ pub static FOCUS: OnceLock<Mutex<crate::focus::FocusTimer>> = OnceLock::new();
 static MEDIA_TITLE: Mutex<String> = Mutex::new(String::new());
 static LYRICS: Mutex<String> = Mutex::new(String::new());
 static WEATHER: Mutex<String> = Mutex::new(String::new());
+static SYSMON: Mutex<String> = Mutex::new(String::new());
+static SYSMON_INSTANCE: OnceLock<Mutex<crate::sysmon::SystemMonitor>> = OnceLock::new();
 static BT_COUNT: Mutex<usize> = Mutex::new(0);
 static NOTIF_COUNT: Mutex<u32> = Mutex::new(0);
 
@@ -13,6 +15,7 @@ pub fn init_focus() {
     let mut t = crate::focus::FocusTimer::new();
     t.start();
     let _ = FOCUS.set(Mutex::new(t));
+    let _ = SYSMON_INSTANCE.set(Mutex::new(crate::sysmon::SystemMonitor::new()));
 }
 
 pub fn set_text(s: &str) {
@@ -40,6 +43,12 @@ pub fn set_lyrics(s: &str) {
 pub fn set_weather(s: &str) {
     if let Ok(mut w) = WEATHER.lock() {
         *w = s.to_string();
+    }
+}
+
+pub fn set_sysmon(s: &str) {
+    if let Ok(mut m) = SYSMON.lock() {
+        *m = s.to_string();
     }
 }
 
@@ -159,7 +168,18 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                     let _ = f.tick();
                     let media = MEDIA_TITLE.lock().map(|m| m.clone()).unwrap_or_default();
                     let lyrics = LYRICS.lock().map(|l| l.clone()).unwrap_or_default();
+                    // Sample system monitor.
+                    if let Some(sm) = SYSMON_INSTANCE.get() {
+                        if let Ok(mut m) = sm.lock() {
+                            m.sample_if_stale(std::time::Duration::from_secs(2));
+                            let s = format!("CPU {:.0}% RAM {:.0}%", m.cpu_usage, m.ram_usage);
+                            if let Ok(mut sys) = SYSMON.lock() {
+                                *sys = s;
+                            }
+                        }
+                    }
                     let weather = WEATHER.lock().map(|w| w.clone()).unwrap_or_default();
+                    let sysmon = SYSMON.lock().map(|s| s.clone()).unwrap_or_default();
                     let bt = BT_COUNT.lock().map(|c| *c).unwrap_or(0);
                     let notif = NOTIF_COUNT.lock().map(|c| *c).unwrap_or(0);
                     let lyric_snip = if lyrics.is_empty() {
@@ -169,10 +189,11 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                         format!(" | {}", s)
                     };
                     let weather_snip = if weather.is_empty() { String::new() } else { format!(" | {}", weather) };
+                    let sysmon_snip = if sysmon.is_empty() { String::new() } else { format!(" | {}", sysmon) };
                     let text = if media.is_empty() {
-                        format!("Focus {}s | BT {} | Notif {}{}{}", f.remaining().as_secs(), bt, notif, lyric_snip, weather_snip)
+                        format!("Focus {}s | BT {} | Notif {}{}{}{}", f.remaining().as_secs(), bt, notif, lyric_snip, weather_snip, sysmon_snip)
                     } else {
-                        format!("{} | Focus {}s | BT {} | Notif {}{}{}", media, f.remaining().as_secs(), bt, notif, lyric_snip, weather_snip)
+                        format!("{} | Focus {}s | BT {} | Notif {}{}{}{}", media, f.remaining().as_secs(), bt, notif, lyric_snip, weather_snip, sysmon_snip)
                     };
                     if let Ok(mut t) = NOTCH_TEXT.lock() {
                         *t = text;
