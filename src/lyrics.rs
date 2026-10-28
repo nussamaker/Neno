@@ -1,5 +1,9 @@
 use std::fs;
-use crate::state;
+use std::time::Duration;
+use crate::{network, state};
+
+/// A cached "no lyrics found" result is trusted for this long, then retried.
+const MISS_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 
 pub fn cache_path(track: &str, artist: &str) -> std::path::PathBuf {
     let dir = state::appdata_dir().join("lyrics");
@@ -22,12 +26,21 @@ fn simple_hash(s: &str) -> u64 {
 
 pub fn fetch_lyrics(track: &str, artist: &str) -> Option<String> {
     let cp = cache_path(track, artist);
-    // Cache: empty file = known miss; non-empty = lyrics.
+    // Cache: a file containing "MISS" is a known miss (retried after MISS_TTL);
+    // any other non-empty file is the lyrics themselves.
     if let Ok(cached) = fs::read_to_string(&cp) {
         if cached == "MISS" {
-            return None;
-        }
-        if !cached.is_empty() {
+            let fresh = fs::metadata(&cp)
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| t.elapsed().ok())
+                .map(|age| age < MISS_TTL)
+                .unwrap_or(false);
+            if fresh {
+                return None;
+            }
+            // Stale miss: fall through and try the network again.
+        } else if !cached.is_empty() {
             return Some(cached);
         }
     }
@@ -37,7 +50,8 @@ pub fn fetch_lyrics(track: &str, artist: &str) -> Option<String> {
         urlencoding(track),
         urlencoding(artist)
     );
-    let resp = ureq::get(&url)
+    let resp = network::http_agent()
+        .get(&url)
         .set("User-Agent", "Neno-Notch/1.0 (Windows)")
         .call()
         .ok()?;
@@ -75,4 +89,43 @@ fn urlencoding(s: &str) -> String {
         }
     }
     out
+}
+
+/// First human-readable line of an LRC/plain lyrics blob, with `[mm:ss.xx]` and
+/// `[ar:...]`-style tags stripped. Used for the short snippet shown in the notch.
+pub fn preview_line(lrc: &str) -> String {
+    for line in lrc.lines() {
+        let mut s = line.trim();
+        while s.starts_with('[') {
+            match s.find(']') {
+                Some(i) => s = s[i + 1..].trim_start(),
+                None => break,
+            }
+        }
+        if !s.is_empty() {
+            return s.to_string();
+        }
+    }
+    String::new()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::preview_line;
+
+    #[test]
+    fn strips_timestamps_and_metadata_tags() {
+        let lrc = "[ar:Someone]\n[ti:Song]\n[00:12.34] Hello there\n[00:15.00] Next line";
+        assert_eq!(preview_line(lrc), "Hello there");
+    }
+
+    #[test]
+    fn plain_lyrics_pass_through() {
+        assert_eq!(preview_line("\n\nFirst line\nSecond"), "First line");
+    }
+
+    #[test]
+    fn empty_when_no_text() {
+        assert_eq!(preview_line("[00:01.00]\n[00:02.00]  "), "");
+    }
 }

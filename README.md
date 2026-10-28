@@ -16,7 +16,9 @@ Reconstructed from reverse engineering of the original "Nusa" app, rebranded to 
 - **System tray icon** — click to toggle the to-do panel
 - **Bluetooth** — paired device listing
 - **Notifications** — count via UserNotificationListener
-- **Network** — connectivity check
+- **Network** — connectivity check, shared HTTP client with timeouts
+- **Weather** — Open-Meteo current conditions, cached 30 min (see Settings)
+- **System monitor** — CPU / RAM in the notch text
 - **State migration** — auto-migrates legacy `%APPDATA%\Nusa` → `%APPDATA%\Neno`
 
 ## Prerequisites
@@ -28,8 +30,8 @@ Reconstructed from reverse engineering of the original "Nusa" app, rebranded to 
 ## Build
 
 ```powershell
-git clone https://github.com/<your-username>/neno.git
-cd neno
+git clone https://github.com/nussamaker/Neno.git
+cd Neno
 cargo build --release
 ```
 
@@ -70,17 +72,42 @@ neno/
 └── README.md
 ```
 
+## Settings
+
+Optional keys in `%APPDATA%\Neno\settings.txt` (one `key=value` per line):
+
+| Key | Default | Meaning |
+|---|---|---|
+| `theme` | `dark` | `dark` or anything else for light |
+| `weather_enabled` | `true` | set to `false` to disable weather (no network call) |
+| `weather_lat` | `51.5074` | latitude, -90 to 90 (default is London) |
+| `weather_lon` | `-0.1278` | longitude, -180 to 180 |
+
+Weather is re-read from settings about every 10 minutes, so edits apply without a restart.
+
+## Threading
+
+The UI thread only creates windows and pumps messages. Anything slow or blocking
+(WinRT media/Bluetooth/notification queries, LRCLIB, Open-Meteo) runs on a single
+background worker (`worker.rs`) with HTTP timeouts, and publishes results through
+the mutex-protected setters in `notch.rs`. The notch's 1-second timer assembles the
+displayed text from whatever has arrived.
+
 ## Data locations
 
 - `%APPDATA%\Neno\` — `settings.txt`, `todo.txt`, `water.txt`, `shelf.txt`, `lyrics\`
 - `%LOCALAPPDATA%\Neno\Shelf\` — dropped shelf files
 
-## Reverse engineering
+## Provenance
 
-This project was reconstructed from static analysis of `NusaSetup.exe` / `nusa.exe`. The full analysis report is in `docs/REA_REPORT.md`. Original identifiers (`Nusa`, `nusa.exe`, AppId `{A03D4881-…}`, hashes) are preserved there as evidence.
+Neno was reconstructed from static analysis of the **Nusa** application by Rama
+(https://rama2555.github.io/nusa/) and rebranded. It is not a clean-room
+implementation. Before distributing it, confirm Nusa's license terms or get the
+original author's permission, and credit them accordingly. The analysis report is
+in `docs/REA_REPORT.md`, and original identifiers (`Nusa`, `nusa.exe`, AppId
+`{A03D4881-…}`, hashes) are preserved there as evidence.
 
 ## License
 
-See LICENSE file. (Add your chosen license.)
-EOF
-echo done
+TODO: no license has been chosen yet. Add a `LICENSE` file once the provenance
+question above is settled.
