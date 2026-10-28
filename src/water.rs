@@ -46,6 +46,11 @@ impl WaterReminder {
                 }
             }
         }
+        // Settings override
+        let settings = crate::settings::Settings::load();
+        if let Some(v) = settings.get("water_goal") {
+            if let Ok(f) = v.parse::<f32>() { w.goal_liters = f; }
+        }
         // Daily reset: if date changed, reset consumed.
         let today = today_string();
         if w.last_date != today {

@@ -106,6 +106,10 @@ unsafe extern "system" fn settings_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lp
                     _ => 1.5,
                 };
                 water.save();
+                // Also persist to settings
+                let mut settings = crate::settings::Settings::load();
+                settings.set("water_goal", &water.goal_liters.to_string());
+                settings.save();
             } else if y >= 54 && y < 78 {
                 // Toggle autostart
                 let enabled = !crate::autostart::is_autostart();
