@@ -10,6 +10,7 @@ mod notifications;
 mod notch;
 mod panel;
 mod settings;
+mod settings_window;
 mod shelf;
 mod state;
 mod sysmon;
@@ -38,6 +39,7 @@ fn main() {
 
     // Create panel (hidden) and tray icon.
     let _ = panel::create_panel();
+    let _ = settings_window::create_settings();
     let _tray = tray::TrayIcon::create();
 
     // Now do the (potentially slow) data gathering.
