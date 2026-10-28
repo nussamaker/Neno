@@ -112,12 +112,16 @@ impl Notch {
             RegisterClassExW(&wc as *const _);
 
             let title: Vec<u16> = "Neno Notch\0".encode_utf16().collect();
+            // Position at top-center of primary screen.
+            let sw = unsafe { windows::Win32::UI::WindowsAndMessaging::GetSystemMetrics(windows::Win32::UI::WindowsAndMessaging::SM_CXSCREEN) };
+            let x = (sw - 420) / 2;
+            let y = 0; // top of screen
             let hwnd = CreateWindowExW(
                 WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_ACCEPTFILES,
                 PCWSTR(class_name.as_ptr()),
                 PCWSTR(title.as_ptr()),
                 WS_POPUP,
-                100, 100, 420, 90,
+                x, y, 420, 90,
                 None, None, wc.hInstance, None,
             )?;
             unsafe {
