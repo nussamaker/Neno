@@ -8,6 +8,8 @@ static LYRICS: Mutex<String> = Mutex::new(String::new());
 static WEATHER: Mutex<String> = Mutex::new(String::new());
 static SYSMON: Mutex<String> = Mutex::new(String::new());
 static SYSMON_INSTANCE: OnceLock<Mutex<crate::sysmon::SystemMonitor>> = OnceLock::new();
+static CPU_HISTORY: Mutex<Vec<f32>> = Mutex::new(Vec::new());
+static RAM_HISTORY: Mutex<Vec<f32>> = Mutex::new(Vec::new());
 static BT_COUNT: Mutex<usize> = Mutex::new(0);
 static NOTIF_COUNT: Mutex<u32> = Mutex::new(0);
 
@@ -76,7 +78,7 @@ use windows::Win32::Graphics::DirectWrite::{
     DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
     DWRITE_MEASURING_MODE_NATURAL,
 };
-use windows::Win32::Graphics::Gdi::{BeginPaint, CreateSolidBrush, DeleteObject, EndPaint, FillRect, InvalidateRect, PAINTSTRUCT, SetBkMode, SetTextColor, TextOutW, TRANSPARENT};
+use windows::Win32::Graphics::Gdi::{BeginPaint, CreatePen, CreateSolidBrush, DeleteObject, EndPaint, FillRect, InvalidateRect, LineTo, MoveToEx, PAINTSTRUCT, SelectObject, SetBkMode, SetTextColor, TextOutW, TRANSPARENT, PS_SOLID};
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, PostQuitMessage,
     RegisterClassExW, SetTimer, TranslateMessage, CS_HREDRAW, CS_VREDRAW, MSG, WM_DESTROY, WM_DROPFILES,
@@ -180,6 +182,15 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                             if let Ok(mut sys) = SYSMON.lock() {
                                 *sys = s;
                             }
+                            // Push to history (cap 60).
+                            if let Ok(mut h) = CPU_HISTORY.lock() {
+                                h.push(m.cpu_usage);
+                                if h.len() > 60 { h.remove(0); }
+                            }
+                            if let Ok(mut h) = RAM_HISTORY.lock() {
+                                h.push(m.ram_usage);
+                                if h.len() > 60 { h.remove(0); }
+                            }
                         }
                     }
                     let weather = WEATHER.lock().map(|w| w.clone()).unwrap_or_default();
@@ -221,7 +232,50 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 let text = get_text();
                 let display = if text.is_empty() { "Neno Notch".to_string() } else { text };
                 let v: Vec<u16> = display.encode_utf16().collect();
-                TextOutW(hdc, 16, 30, &v);
+                TextOutW(hdc, 16, 8, &v);
+
+                // Draw CPU/RAM history graph (right side, small)
+                if let Ok(cpu_hist) = CPU_HISTORY.lock() {
+                    if let Ok(ram_hist) = RAM_HISTORY.lock() {
+                        let graph_x = 260i32;
+                        let graph_y = 10i32;
+                        let graph_w = 150i32;
+                        let graph_h = 70i32;
+                        // CPU line (green)
+                        let cpu_brush = CreateSolidBrush(windows::Win32::Foundation::COLORREF(0x0000FF00));
+                        let _ = DeleteObject(windows::Win32::Graphics::Gdi::HGDIOBJ(cpu_brush.0));
+                        // Draw CPU as green line
+                        if cpu_hist.len() > 1 {
+                            let pen = CreatePen(PS_SOLID, 1, windows::Win32::Foundation::COLORREF(0x0000FF00));
+                            let old = SelectObject(hdc, windows::Win32::Graphics::Gdi::HGDIOBJ(pen.0));
+                            let step = graph_w as f32 / (cpu_hist.len() as f32 - 1.0).max(1.0);
+                            let first = cpu_hist[0];
+                            let _ = MoveToEx(hdc, graph_x, graph_y + graph_h - (first / 100.0 * graph_h as f32) as i32, None);
+                            for (i, &val) in cpu_hist.iter().enumerate().skip(1) {
+                                let px = graph_x + (i as f32 * step) as i32;
+                                let py = graph_y + graph_h - (val / 100.0 * graph_h as f32) as i32;
+                                let _ = LineTo(hdc, px, py);
+                            }
+                            SelectObject(hdc, old);
+                            let _ = DeleteObject(windows::Win32::Graphics::Gdi::HGDIOBJ(pen.0));
+                        }
+                        // Draw RAM as blue line
+                        if ram_hist.len() > 1 {
+                            let pen = CreatePen(PS_SOLID, 1, windows::Win32::Foundation::COLORREF(0x00FF0000));
+                            let old = SelectObject(hdc, windows::Win32::Graphics::Gdi::HGDIOBJ(pen.0));
+                            let step = graph_w as f32 / (ram_hist.len() as f32 - 1.0).max(1.0);
+                            let first = ram_hist[0];
+                            let _ = MoveToEx(hdc, graph_x, graph_y + graph_h - (first / 100.0 * graph_h as f32) as i32, None);
+                            for (i, &val) in ram_hist.iter().enumerate().skip(1) {
+                                let px = graph_x + (i as f32 * step) as i32;
+                                let py = graph_y + graph_h - (val / 100.0 * graph_h as f32) as i32;
+                                let _ = LineTo(hdc, px, py);
+                            }
+                            SelectObject(hdc, old);
+                            let _ = DeleteObject(windows::Win32::Graphics::Gdi::HGDIOBJ(pen.0));
+                        }
+                    }
+                }
                 let _ = EndPaint(hwnd, &ps);
             }
             LRESULT(0)
