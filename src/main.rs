@@ -23,6 +23,11 @@ fn main() {
     state::migrate_from_nusa();
     state::ensure_dirs();
     notch::init_focus();
+    // Load theme from settings
+    let settings = settings::Settings::load();
+    if let Some(t) = settings.get("theme") {
+        notch::set_theme(t == "dark");
+    }
 
     // Create and show the notch window FIRST so the user sees something immediately.
     let _notch = match notch::Notch::create() {

@@ -87,6 +87,11 @@ unsafe extern "system" fn settings_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lp
                 TextOutW(hdc, 10, y, &av);
                 y += 24;
 
+                let theme = if crate::notch::is_dark_theme() { "Theme: Dark (click to toggle)" } else { "Theme: Light (click to toggle)" };
+                let tv: Vec<u16> = theme.encode_utf16().collect();
+                TextOutW(hdc, 10, y, &tv);
+                y += 24;
+
                 let hint: Vec<u16> = "Click water goal to cycle 1.5/2.0/2.5/3.0".encode_utf16().collect();
                 TextOutW(hdc, 10, y, &hint);
 
@@ -116,6 +121,14 @@ unsafe extern "system" fn settings_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lp
                 if let Ok(exe) = std::env::current_exe() {
                     crate::autostart::set_autostart(enabled, &exe);
                 }
+            } else if y >= 78 && y < 102 {
+                // Toggle theme
+                let dark = !crate::notch::is_dark_theme();
+                crate::notch::set_theme(dark);
+                // Persist to settings
+                let mut settings = crate::settings::Settings::load();
+                settings.set("theme", if dark { "dark" } else { "light" });
+                settings.save();
             }
             unsafe {
                 use windows::Win32::Graphics::Gdi::InvalidateRect;

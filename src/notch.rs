@@ -2,6 +2,7 @@ use std::sync::Mutex;
 
 use std::sync::OnceLock;
 static NOTCH_TEXT: Mutex<String> = Mutex::new(String::new());
+static THEME_DARK: Mutex<bool> = Mutex::new(true);
 #[allow(static_mut_refs)]
 static mut NOTCH_HWND: Option<HWND> = None;
 
@@ -51,6 +52,16 @@ pub fn set_text(s: &str) {
 
 pub fn get_text() -> String {
     NOTCH_TEXT.lock().map(|t| t.clone()).unwrap_or_default()
+}
+
+pub fn set_theme(dark: bool) {
+    if let Ok(mut t) = THEME_DARK.lock() {
+        *t = dark;
+    }
+}
+
+pub fn is_dark_theme() -> bool {
+    THEME_DARK.lock().map(|t| *t).unwrap_or(true)
 }
 
 pub fn set_media_title(s: &str) {
@@ -247,10 +258,14 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 let mut ps = PAINTSTRUCT::default();
                 let hdc = BeginPaint(hwnd, &mut ps);
                 // GDI fallback rendering (reliable)
+                let dark = is_dark_theme();
+                let bg_color = if dark { 0x00141414u32 } else { 0x00E0E0E0u32 };
+                let text_color = if dark { 0x00FFFFFFu32 } else { 0x00000000u32 };
                 let mut rc = RECT { left: 0, top: 0, right: 420, bottom: 90 };
-                let brush = CreateSolidBrush(windows::Win32::Foundation::COLORREF(0x00141414));
+                let brush = CreateSolidBrush(windows::Win32::Foundation::COLORREF(bg_color));
                 FillRect(hdc, &rc, brush);
                 let _ = DeleteObject(windows::Win32::Graphics::Gdi::HGDIOBJ(brush.0));
+                SetTextColor(hdc, windows::Win32::Foundation::COLORREF(text_color));
                 // border
                 let pen = CreatePen(PS_SOLID, 1, windows::Win32::Foundation::COLORREF(0x00333333));
                 let old = SelectObject(hdc, windows::Win32::Graphics::Gdi::HGDIOBJ(pen.0));
