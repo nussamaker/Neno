@@ -557,10 +557,12 @@ unsafe fn paint(hwnd: HWND) {
 
     paint_dots(hdc, &p, page);
     if page > 0 {
-        chevron(hdc, 22, 70, -1, p.faint);
+        circle(hdc, 22, 70, 11, p.faint);
+        chevron(hdc, 22, 70, -1, p.dim);
     }
     if page + 1 < PAGE_COUNT {
-        chevron(hdc, EXPANDED_W - 22, 70, 1, p.faint);
+        circle(hdc, EXPANDED_W - 22, 70, 11, p.faint);
+        chevron(hdc, EXPANDED_W - 22, 70, 1, p.dim);
     }
 
     for f in [f_date, f_time, f_title, f_small, f_tiny, f_big, f_mid, f_btn, f_glyph] {
@@ -653,7 +655,7 @@ unsafe fn paint_media(
         f_title,
         p.text,
         &title,
-        RECT { left: 96, top: 36, right: EXPANDED_W - 14, bottom: 58 },
+        RECT { left: 96, top: 36, right: EXPANDED_W - 46, bottom: 58 },
         DT_LEFT | DT_END_ELLIPSIS,
     );
     let lyric = LYRICS.lock().map(|l| l.clone()).unwrap_or_default();
@@ -664,7 +666,7 @@ unsafe fn paint_media(
             f_small,
             p.dim,
             &subtitle,
-            RECT { left: 96, top: 56, right: EXPANDED_W - 14, bottom: 74 },
+            RECT { left: 96, top: 56, right: EXPANDED_W - 46, bottom: 74 },
             DT_LEFT | DT_END_ELLIPSIS,
         );
     }
@@ -682,13 +684,13 @@ unsafe fn paint_media(
         RECT { left: 96, top: 72, right: 132, bottom: 88 },
         DT_LEFT,
     );
-    progress_bar(hdc, 132, 77, EXPANDED_W - 56, pct, p.text, p.track);
+    progress_bar(hdc, 132, 77, EXPANDED_W - 86, pct, p.text, p.track);
     draw_text(
         hdc,
         f_tiny,
         p.dim,
         &format!("-{}", mmss(if has { dur.saturating_sub(pos) } else { 0 })),
-        RECT { left: EXPANDED_W - 62, top: 72, right: EXPANDED_W - 20, bottom: 88 },
+        RECT { left: EXPANDED_W - 82, top: 72, right: EXPANDED_W - 39, bottom: 88 },
         DT_RIGHT,
     );
 

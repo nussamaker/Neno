@@ -46,12 +46,15 @@ pub fn create_panel() -> Result<HWND, windows::core::Error> {
         RegisterClassExW(&wc as *const _);
 
         let title: Vec<u16> = "Neno Panel\0".encode_utf16().collect();
+        let sw = windows::Win32::UI::WindowsAndMessaging::GetSystemMetrics(
+            windows::Win32::UI::WindowsAndMessaging::SM_CXSCREEN,
+        );
         let hwnd = CreateWindowExW(
             WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
             PCWSTR(class_name.as_ptr()),
             PCWSTR(title.as_ptr()),
             WS_OVERLAPPEDWINDOW,
-            100, 120, 340, 500,
+            (sw - 340) / 2, 150, 340, 500,
             None, None, wc.hInstance, None,
         )?;
         set_panel_hwnd(hwnd);
@@ -78,8 +81,9 @@ pub fn show_panel() {
     if let Some(hwnd) = panel_hwnd() {
         PANEL_VISIBLE.store(true, Ordering::SeqCst);
         unsafe {
-            use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_SHOW};
+            use windows::Win32::UI::WindowsAndMessaging::{SetForegroundWindow, ShowWindow, SW_SHOW};
             let _ = ShowWindow(hwnd, SW_SHOW);
+            let _ = SetForegroundWindow(hwnd);
         }
     }
 }
@@ -200,6 +204,16 @@ unsafe extern "system" fn panel_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpara
             unsafe {
                 use windows::Win32::Graphics::Gdi::InvalidateRect;
                 InvalidateRect(hwnd, None, false);
+            }
+            LRESULT(0)
+        }
+        WM_KEYDOWN => {
+            if wparam.0 as u32 == windows::Win32::UI::Input::KeyboardAndMouse::VK_ESCAPE.0 as u32 {
+                unsafe {
+                    use windows::Win32::UI::WindowsAndMessaging::ShowWindow;
+                    let _ = ShowWindow(hwnd, SW_HIDE);
+                    PANEL_VISIBLE.store(false, Ordering::SeqCst);
+                }
             }
             LRESULT(0)
         }
