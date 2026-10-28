@@ -53,4 +53,10 @@ impl TodoList {
             it.done = !it.done;
         }
     }
+
+    pub fn remove(&mut self, idx: usize) {
+        if idx < self.items.len() {
+            self.items.remove(idx);
+        }
+    }
 }

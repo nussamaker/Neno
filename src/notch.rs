@@ -210,6 +210,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
     }
 }
 
+#[allow(dead_code)]
 fn render_d2d(hwnd: HWND) -> Result<(), windows::core::Error> {
     unsafe {
         let factory: ID2D1Factory = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None)?;

@@ -1,16 +1,28 @@
-use std::sync::Mutex;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{BeginPaint, CreateSolidBrush, DeleteObject, EndPaint, FillRect, SetBkMode, SetTextColor, TextOutW, PAINTSTRUCT, TRANSPARENT};
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, PostQuitMessage, RegisterClassExW,
     ShowWindow, TranslateMessage, CS_HREDRAW, CS_VREDRAW, MSG, SW_HIDE, SW_SHOW, WM_CHAR, WM_CLOSE,
-    WM_DESTROY, WM_KEYDOWN, WM_LBUTTONDOWN, WM_PAINT, WNDCLASSEXW, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
-    WS_OVERLAPPEDWINDOW,
+    WM_DESTROY, WM_KEYDOWN, WM_LBUTTONDOWN, WM_PAINT, WM_RBUTTONDOWN, WNDCLASSEXW, WS_EX_TOOLWINDOW,
+    WS_EX_TOPMOST, WS_OVERLAPPEDWINDOW,
 };
 use windows::core::PCWSTR;
 
-static mut PANEL_VISIBLE: bool = false;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
+
+#[allow(static_mut_refs)]
+static PANEL_VISIBLE: AtomicBool = AtomicBool::new(false);
+#[allow(static_mut_refs)]
 static mut PANEL_HWND: Option<HWND> = None;
+
+fn panel_hwnd() -> Option<HWND> {
+    unsafe { PANEL_HWND }
+}
+
+fn set_panel_hwnd(hwnd: HWND) {
+    unsafe { PANEL_HWND = Some(hwnd); }
+}
 static INPUT: Mutex<String> = Mutex::new(String::new());
 
 pub fn create_panel() -> Result<HWND, windows::core::Error> {
@@ -43,16 +55,17 @@ pub fn create_panel() -> Result<HWND, windows::core::Error> {
             100, 120, 340, 460,
             None, None, wc.hInstance, None,
         )?;
-        PANEL_HWND = Some(hwnd);
+        set_panel_hwnd(hwnd);
         Ok(hwnd)
     }
 }
 
 pub fn toggle_panel() {
-    unsafe {
-        if let Some(hwnd) = PANEL_HWND {
-            PANEL_VISIBLE = !PANEL_VISIBLE;
-            if PANEL_VISIBLE {
+    if let Some(hwnd) = panel_hwnd() {
+        let now = !PANEL_VISIBLE.load(Ordering::SeqCst);
+        PANEL_VISIBLE.store(now, Ordering::SeqCst);
+        unsafe {
+            if now {
                 ShowWindow(hwnd, SW_SHOW);
             } else {
                 ShowWindow(hwnd, SW_HIDE);
@@ -154,11 +167,26 @@ unsafe extern "system" fn panel_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpara
             }
             LRESULT(0)
         }
+        WM_RBUTTONDOWN => {
+            let y = ((lparam.0 >> 16) & 0xFFFF) as i32;
+            if y < 34 { return LRESULT(0); }
+            let idx = ((y - 34) / 18) as usize;
+            let mut todo = crate::todo::TodoList::load();
+            if idx < todo.items.len() {
+                todo.items.remove(idx);
+                todo.save();
+            }
+            unsafe {
+                use windows::Win32::Graphics::Gdi::InvalidateRect;
+                InvalidateRect(hwnd, None, false);
+            }
+            LRESULT(0)
+        }
         WM_CLOSE => {
             unsafe {
                 use windows::Win32::UI::WindowsAndMessaging::ShowWindow;
                 ShowWindow(hwnd, SW_HIDE);
-                PANEL_VISIBLE = false;
+                PANEL_VISIBLE.store(false, Ordering::SeqCst);
             }
             LRESULT(0)
         }

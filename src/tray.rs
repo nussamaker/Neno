@@ -89,15 +89,14 @@ impl Drop for TrayIcon {
 unsafe extern "system" fn tray_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     match msg {
         TRAY_MSG => {
-            // lparam contains the mouse event
             let event = lparam.0 as u32;
-            if event == 0x0205 {
-                // WM_RBUTTONUP -> show context menu (simplified: just toggle notch)
-                // For now, left click toggles panel
-            }
             if event == 0x0202 {
                 // WM_LBUTTONUP -> toggle panel
                 crate::panel::toggle_panel();
+            }
+            if event == 0x0205 {
+                // WM_RBUTTONUP -> exit
+                std::process::exit(0);
             }
             LRESULT(0)
         }
