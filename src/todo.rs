@@ -17,8 +17,11 @@ impl TodoList {
         let path = state::appdata_dir().join("todo.txt");
         let mut list = Self::default();
         if let Ok(txt) = fs::read_to_string(&path) {
+            // Editors on Windows may prepend a UTF-8 BOM; without stripping it
+            // the first line becomes a phantom task.
+            let txt = txt.strip_prefix('\u{feff}').unwrap_or(&txt);
             for line in txt.lines() {
-                if line.is_empty() { continue; }
+                if line.trim().is_empty() { continue; }
                 let (done, text) = if let Some(rest) = line.strip_prefix("[x] ") {
                     (true, rest)
                 } else if let Some(rest) = line.strip_prefix("[ ] ") {

@@ -75,6 +75,7 @@ const HOVER_WATER_DRANK: usize = 50;
 const HOVER_WATER_SNOOZE: usize = 51;
 const HOVER_WATER_RESET: usize = 52;
 const HOVER_SHELF_ZONE: usize = 60;
+const HOVER_TODO_CARD: usize = 61;
 
 fn hover_is(id: usize) -> bool {
     HOVER_ID.load(Ordering::Relaxed) == id
@@ -691,7 +692,7 @@ unsafe fn paint(hwnd: HWND) {
         ),
         PAGE_FOCUS => paint_focus(hdc, &p, f_big, f_date, f_time, f_small, f_btn, &clock, &date),
         PAGE_WATER => paint_water(hdc, &p, f_mid, f_date, f_time, f_small, f_btn, &clock, &date),
-        PAGE_TODO => paint_todo(hdc, &p, f_date, f_time, f_small, f_tiny, &clock, &date),
+        PAGE_TODO => paint_todo(hdc, &p, f_title, f_date, f_time, f_small, f_tiny, &clock, &date),
         _ => paint_shelf(hdc, &p, f_date, f_time, f_title, f_small, f_tiny, &clock, &date),
     }
 
@@ -979,6 +980,7 @@ unsafe fn paint_water(
 unsafe fn paint_todo(
     hdc: HDC,
     p: &Palette,
+    f_title: HFONT,
     f_date: HFONT,
     f_time: HFONT,
     f_small: HFONT,
@@ -989,49 +991,94 @@ unsafe fn paint_todo(
     paint_header(hdc, p, f_date, f_time, clock, date);
     let list = crate::todo::TodoList::load();
     let open: Vec<_> = list.items.iter().filter(|i| !i.done).collect();
+
+    // Task card uses the same language as the shelf drop zone.
+    let hot = hover_is(HOVER_TODO_CARD);
+    let (l, t, r, b) = (44, 38, EXPANDED_W - 44, 108);
+    let brush = CreateSolidBrush(COLORREF(p.art));
+    let pen = CreatePen(
+        PS_SOLID,
+        if hot { 2 } else { 1 },
+        COLORREF(if hot { p.dim } else { p.faint }),
+    );
+    let old_brush = SelectObject(hdc, HGDIOBJ(brush.0));
+    let old_pen = SelectObject(hdc, HGDIOBJ(pen.0));
+    let _ = RoundRect(hdc, l, t, r, b, 28, 28);
+    SelectObject(hdc, old_pen);
+    SelectObject(hdc, old_brush);
+    let _ = DeleteObject(HGDIOBJ(pen.0));
+    let _ = DeleteObject(HGDIOBJ(brush.0));
+
     if open.is_empty() {
+        // Completed-task mark.
+        let cx = EXPANDED_W / 2;
+        let icon = CreatePen(PS_SOLID, 1, COLORREF(p.dim));
+        let ob = SelectObject(hdc, HGDIOBJ(icon.0));
+        let op = SelectObject(hdc, GetStockObject(NULL_BRUSH));
+        let _ = Ellipse(hdc, cx - 7, 48, cx + 8, 63);
+        SelectObject(hdc, op);
+        SelectObject(hdc, ob);
+        let _ = DeleteObject(HGDIOBJ(icon.0));
+        line(hdc, cx - 4, 55, cx - 1, 58, p.dim, 1);
+        line(hdc, cx - 1, 58, cx + 4, 52, p.dim, 1);
+
+        let title = if list.items.is_empty() {
+            "No tasks yet"
+        } else {
+            "All caught up"
+        };
+        draw_text(
+            hdc,
+            f_title,
+            p.text,
+            title,
+            RECT { left: 0, top: 60, right: EXPANDED_W, bottom: 78 },
+            DT_CENTER,
+        );
         draw_text(
             hdc,
             f_small,
             p.dim,
-            "No tasks. Click to add one.",
-            RECT { left: 0, top: 44, right: EXPANDED_W, bottom: 66 },
+            "Click to open the task panel",
+            RECT { left: 0, top: 80, right: EXPANDED_W, bottom: 96 },
             DT_CENTER,
         );
     } else {
         for (i, item) in open.iter().take(3).enumerate() {
-            let y = 36 + (i as i32) * 24;
-            let bx = 28;
-            let brush = CreateSolidBrush(COLORREF(p.track));
-            let ob = SelectObject(hdc, HGDIOBJ(brush.0));
-            let op = SelectObject(hdc, GetStockObject(NULL_PEN));
-            RoundRect(hdc, bx, y, bx + 12, y + 12, 6, 6);
+            let y = 50 + (i as i32) * 18;
+            let bx = 60;
+            let box_pen = CreatePen(PS_SOLID, 1, COLORREF(p.sub));
+            let ob = SelectObject(hdc, HGDIOBJ(box_pen.0));
+            let op = SelectObject(hdc, GetStockObject(NULL_BRUSH));
+            let _ = RoundRect(hdc, bx, y, bx + 12, y + 12, 4, 4);
             SelectObject(hdc, op);
             SelectObject(hdc, ob);
-            let _ = DeleteObject(HGDIOBJ(brush.0));
+            let _ = DeleteObject(HGDIOBJ(box_pen.0));
             draw_text(
                 hdc,
                 f_small,
                 p.text,
                 &item.text,
-                RECT { left: bx + 20, top: y - 2, right: EXPANDED_W - 20, bottom: y + 14 },
+                RECT { left: bx + 20, top: y - 2, right: EXPANDED_W - 60, bottom: y + 14 },
                 DT_LEFT | DT_END_ELLIPSIS,
             );
         }
+        if open.len() > 3 {
+            draw_text(
+                hdc,
+                f_tiny,
+                p.dim,
+                &format!("+{} more open", open.len() - 3),
+                RECT {
+                    left: EXPANDED_W - 180,
+                    top: 108,
+                    right: EXPANDED_W - 44,
+                    bottom: 124,
+                },
+                DT_RIGHT,
+            );
+        }
     }
-    let hint = if list.items.is_empty() {
-        "Open the task panel to get started"
-    } else {
-        "Click to open the task panel"
-    };
-    draw_text(
-        hdc,
-        f_tiny,
-        p.dim,
-        hint,
-        RECT { left: 0, top: 108, right: EXPANDED_W, bottom: 126 },
-        DT_CENTER,
-    );
 }
 
 unsafe fn paint_shelf(
@@ -1207,10 +1254,10 @@ fn hotspot(x: i32, y: i32) -> usize {
         return 0;
     }
     if (x < 38 || x > EXPANDED_W - 38) && (46..=94).contains(&y) {
-        if x < 38 && page > 0 {
+        if x < 38 {
             return HOVER_CHEV_LEFT;
         }
-        if x > EXPANDED_W - 38 && page + 1 < PAGE_COUNT {
+        if x > EXPANDED_W - 38 {
             return HOVER_CHEV_RIGHT;
         }
         return 0;
@@ -1260,6 +1307,11 @@ fn hotspot(x: i32, y: i32) -> usize {
                 return HOVER_SHELF_ZONE;
             }
         }
+        PAGE_TODO => {
+            if (44..=(EXPANDED_W - 44)).contains(&x) && (38..=108).contains(&y) {
+                return HOVER_TODO_CARD;
+            }
+        }
         _ => {}
     }
     0
@@ -1288,10 +1340,10 @@ fn click(hwnd: HWND, x: i32, y: i32) {
     // Side chevrons navigate pages.
     if (x < 38 || x > EXPANDED_W - 38) && (46..=94).contains(&y) {
         let mut next = page;
-        if x < 38 && page > 0 {
-            next = page - 1;
-        } else if x > EXPANDED_W - 38 && page + 1 < PAGE_COUNT {
-            next = page + 1;
+        if x < 38 {
+            next = if page == 0 { PAGE_COUNT - 1 } else { page - 1 };
+        } else if x > EXPANDED_W - 38 {
+            next = (page + 1) % PAGE_COUNT;
         }
         if next != page {
             PAGE.store(next, Ordering::Relaxed);
