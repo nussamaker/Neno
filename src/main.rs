@@ -15,6 +15,7 @@ mod state;
 mod todo;
 mod tray;
 mod water;
+mod weather;
 
 fn main() {
     state::migrate_from_nusa();
@@ -52,6 +53,11 @@ fn main() {
         notifications::notification_count()
     })();
     notch::set_notif_count(nc);
+
+    // Weather (default location; configure lat/lon as needed)
+    if let Some(w) = weather::fetch_weather(51.5074, -0.1278) {
+        notch::set_weather(&format!("{:.0}C {}", w.temperature, w.condition));
+    }
 
     if let Some(m) = media::MediaSession::current() {
         notch::set_media_title(&format!("{} — {}", m.title, m.artist));

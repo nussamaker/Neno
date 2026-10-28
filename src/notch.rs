@@ -5,6 +5,7 @@ static NOTCH_TEXT: Mutex<String> = Mutex::new(String::new());
 pub static FOCUS: OnceLock<Mutex<crate::focus::FocusTimer>> = OnceLock::new();
 static MEDIA_TITLE: Mutex<String> = Mutex::new(String::new());
 static LYRICS: Mutex<String> = Mutex::new(String::new());
+static WEATHER: Mutex<String> = Mutex::new(String::new());
 static BT_COUNT: Mutex<usize> = Mutex::new(0);
 static NOTIF_COUNT: Mutex<u32> = Mutex::new(0);
 
@@ -33,6 +34,12 @@ pub fn set_media_title(s: &str) {
 pub fn set_lyrics(s: &str) {
     if let Ok(mut l) = LYRICS.lock() {
         *l = s.to_string();
+    }
+}
+
+pub fn set_weather(s: &str) {
+    if let Ok(mut w) = WEATHER.lock() {
+        *w = s.to_string();
     }
 }
 
@@ -152,6 +159,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                     let _ = f.tick();
                     let media = MEDIA_TITLE.lock().map(|m| m.clone()).unwrap_or_default();
                     let lyrics = LYRICS.lock().map(|l| l.clone()).unwrap_or_default();
+                    let weather = WEATHER.lock().map(|w| w.clone()).unwrap_or_default();
                     let bt = BT_COUNT.lock().map(|c| *c).unwrap_or(0);
                     let notif = NOTIF_COUNT.lock().map(|c| *c).unwrap_or(0);
                     let lyric_snip = if lyrics.is_empty() {
@@ -160,10 +168,11 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                         let s: String = lyrics.chars().take(20).collect();
                         format!(" | {}", s)
                     };
+                    let weather_snip = if weather.is_empty() { String::new() } else { format!(" | {}", weather) };
                     let text = if media.is_empty() {
-                        format!("Focus {}s | BT {} | Notif {}{}", f.remaining().as_secs(), bt, notif, lyric_snip)
+                        format!("Focus {}s | BT {} | Notif {}{}{}", f.remaining().as_secs(), bt, notif, lyric_snip, weather_snip)
                     } else {
-                        format!("{} | Focus {}s | BT {} | Notif {}{}", media, f.remaining().as_secs(), bt, notif, lyric_snip)
+                        format!("{} | Focus {}s | BT {} | Notif {}{}{}", media, f.remaining().as_secs(), bt, notif, lyric_snip, weather_snip)
                     };
                     if let Ok(mut t) = NOTCH_TEXT.lock() {
                         *t = text;
