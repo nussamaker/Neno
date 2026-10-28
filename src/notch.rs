@@ -20,7 +20,7 @@ use windows::Win32::System::SystemInformation::GetLocalTime;
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DispatchMessageW, GetCursorPos, GetMessageW, GetSystemMetrics,
     GetWindowRect, PostQuitMessage, RegisterClassExW, SetTimer, SetWindowPos, TranslateMessage,
-    CS_HREDRAW, CS_VREDRAW, HWND_TOPMOST, MSG, SM_CXSCREEN, SWP_NOACTIVATE, SWP_SHOWWINDOW,
+    CS_DROPSHADOW, CS_HREDRAW, CS_VREDRAW, HWND_TOPMOST, MSG, SM_CXSCREEN, SWP_NOACTIVATE, SWP_SHOWWINDOW,
     WM_DESTROY, WM_DROPFILES, WM_KEYDOWN, WM_LBUTTONDOWN, WM_MOUSEWHEEL, WM_PAINT, WM_RBUTTONDOWN,
     WM_TIMER, WNDCLASSEXW, WS_EX_ACCEPTFILES, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
@@ -385,7 +385,7 @@ unsafe fn status_icon(hdc: HDC, cx: i32, cy: i32, color: u32, bolt: u32) {
         POINT { x: cx - 1, y: cy + 1 },
         POINT { x: cx - 5, y: cy + 1 },
     ];
-    filled_poly(hdc, &pts, 0x00FFFFFF);
+    filled_poly(hdc, &pts, bolt);
 }
 
 unsafe fn play_triangle(hdc: HDC, cx: i32, cy: i32, color: u32) {
@@ -1045,7 +1045,7 @@ impl Notch {
             let class_name: Vec<u16> = "NenoNotch\0".encode_utf16().collect();
             let wc = WNDCLASSEXW {
                 cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
-                style: CS_HREDRAW | CS_VREDRAW,
+                style: CS_HREDRAW | CS_VREDRAW | CS_DROPSHADOW,
                 lpfnWndProc: Some(wnd_proc),
                 cbClsExtra: 0,
                 cbWndExtra: 0,

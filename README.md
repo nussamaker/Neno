@@ -11,14 +11,15 @@ Reconstructed from reverse engineering of the original "Nusa" app, rebranded to 
 - **Navigation** — click the pill to expand, click the page dots or side chevrons, scroll the mouse wheel, right-click or move away to collapse
 - **Focus timer** — Pomodoro (25 min focus / 5 min short break / 15 min long break)
 - **Water reminder** — bottle goals (1.5 / 2.0 / 2.5 / 3.0 L), refill/snooze, progress
-- **To-do list** — add (type + Enter), toggle (click), persisted to `%APPDATA%\Neno\todo.txt`
+- **To-do list** — dark task panel with checkboxes: add (type + Enter), toggle (click), remove (right-click), scroll with the wheel, persisted to `%APPDATA%\Neno\todo.txt`
 - **Shelf** — file copy + `.url` Internet Shortcuts, drag-and-drop (WM_DROPFILES)
 - **Autostart** — toggle `HKCU\...\Run\Neno`
 - **System tray icon** — left-click toggles the to-do panel; right-click opens Toggle Panel / Toggle Notch / Settings / Quit
 - **Bluetooth** — paired device listing
 - **Notifications** — count via UserNotificationListener
 - **Network** — connectivity check, shared HTTP client with timeouts
-- **Weather** — Open-Meteo current conditions, cached 30 min (see Settings)
+- **Weather** — Open-Meteo current conditions, cached 30 min
+- **Settings window** — dark Nusa-styled card for water goal, autostart, theme, and weather; Esc to close
 - **System monitor** — CPU / RAM in the notch text
 - **State migration** — auto-migrates legacy `%APPDATA%\Nusa` → `%APPDATA%\Neno`
 

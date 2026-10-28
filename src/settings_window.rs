@@ -1,14 +1,32 @@
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
-use windows::Win32::Graphics::Gdi::{BeginPaint, CreateSolidBrush, DeleteObject, EndPaint, FillRect, SetBkMode, SetTextColor, TextOutW, PAINTSTRUCT, TRANSPARENT};
-use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, PostQuitMessage, RegisterClassExW,
-    ShowWindow, TranslateMessage, CS_HREDRAW, CS_VREDRAW, MSG, SW_HIDE, SW_SHOW, WM_CLOSE, WM_DESTROY,
-    WM_LBUTTONDOWN, WM_PAINT, WNDCLASSEXW, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_OVERLAPPEDWINDOW,
-};
-use windows::core::PCWSTR;
+use std::sync::atomic::{AtomicBool, Ordering};
 
-static mut SETTINGS_VISIBLE: bool = false;
+use windows::core::PCWSTR;
+use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
+use windows::Win32::Graphics::Gdi::{
+    BeginPaint, DeleteObject, EndPaint, InvalidateRect, PAINTSTRUCT, DT_LEFT, DT_RIGHT, HDC,
+    HGDIOBJ,
+};
+use windows::Win32::UI::WindowsAndMessaging::{
+    AdjustWindowRect, CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW,
+    GetSystemMetrics, PostQuitMessage, RegisterClassExW, SetForegroundWindow, ShowWindow,
+    TranslateMessage, CS_HREDRAW, CS_VREDRAW, MSG, SM_CXSCREEN, SW_HIDE, SW_SHOW, WM_CLOSE,
+    WM_DESTROY, WM_KEYDOWN, WM_LBUTTONDOWN, WM_PAINT, WNDCLASSEXW, WS_CAPTION, WS_EX_TOOLWINDOW,
+    WS_EX_TOPMOST, WS_MINIMIZEBOX, WS_SYSMENU, WINDOW_STYLE,
+};
+
+use crate::ui;
+
+const W: i32 = 360;
+const H: i32 = 330;
+const STYLE: WINDOW_STYLE = WINDOW_STYLE(WS_CAPTION.0 | WS_SYSMENU.0 | WS_MINIMIZEBOX.0);
+
+static SETTINGS_VISIBLE: AtomicBool = AtomicBool::new(false);
+#[allow(static_mut_refs)]
 static mut SETTINGS_HWND: Option<HWND> = None;
+
+fn settings_hwnd() -> Option<HWND> {
+    unsafe { SETTINGS_HWND }
+}
 
 pub fn create_settings() -> Result<HWND, windows::core::Error> {
     unsafe {
@@ -31,78 +49,177 @@ pub fn create_settings() -> Result<HWND, windows::core::Error> {
         };
         RegisterClassExW(&wc as *const _);
 
+        let mut rc = RECT { left: 0, top: 0, right: W, bottom: H };
+        let _ = AdjustWindowRect(&mut rc, STYLE, false);
+        let outer_w = rc.right - rc.left;
+        let outer_h = rc.bottom - rc.top;
+        let sw = GetSystemMetrics(SM_CXSCREEN);
+
         let title: Vec<u16> = "Neno Settings\0".encode_utf16().collect();
         let hwnd = CreateWindowExW(
             WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
             PCWSTR(class_name.as_ptr()),
             PCWSTR(title.as_ptr()),
-            WS_OVERLAPPEDWINDOW,
-            200, 200, 320, 260,
-            None, None, wc.hInstance, None,
+            STYLE,
+            (sw - outer_w) / 2,
+            160,
+            outer_w,
+            outer_h,
+            None,
+            None,
+            wc.hInstance,
+            None,
         )?;
+        ui::dark_frame(hwnd);
         SETTINGS_HWND = Some(hwnd);
         Ok(hwnd)
     }
 }
 
 pub fn toggle_settings() {
-    unsafe {
-        if let Some(hwnd) = SETTINGS_HWND {
-            SETTINGS_VISIBLE = !SETTINGS_VISIBLE;
-            if SETTINGS_VISIBLE {
-                ShowWindow(hwnd, SW_SHOW);
+    if let Some(hwnd) = settings_hwnd() {
+        let now = !SETTINGS_VISIBLE.load(Ordering::SeqCst);
+        SETTINGS_VISIBLE.store(now, Ordering::SeqCst);
+        unsafe {
+            if now {
+                let _ = ShowWindow(hwnd, SW_SHOW);
+                let _ = SetForegroundWindow(hwnd);
             } else {
-                ShowWindow(hwnd, SW_HIDE);
+                let _ = ShowWindow(hwnd, SW_HIDE);
             }
         }
     }
 }
 
-unsafe extern "system" fn settings_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+fn rect(l: i32, t: i32, r: i32, b: i32) -> RECT {
+    RECT { left: l, top: t, right: r, bottom: b }
+}
+
+unsafe fn row(
+    hdc: HDC,
+    top: i32,
+    label: &str,
+    value: &str,
+    pill_bg: u32,
+    pill_fg: u32,
+    f_body: windows::Win32::Graphics::Gdi::HFONT,
+    f_value: windows::Win32::Graphics::Gdi::HFONT,
+) {
+    ui::round(hdc, 14, top, W - 14, top + 40, 12, ui::CARD);
+    ui::text(hdc, f_body, ui::TEXT, label, rect(28, top + 2, 220, top + 38), DT_LEFT);
+    let pill_w = 84;
+    let pill_x = W - 14 - 14 - pill_w;
+    ui::pill(hdc, pill_x, top + 8, pill_w, 24, pill_bg, pill_fg, value, f_value);
+}
+
+unsafe fn paint(hwnd: HWND) {
+    let mut ps = PAINTSTRUCT::default();
+    let hdc = BeginPaint(hwnd, &mut ps);
+    ui::fill(hdc, 0, 0, W, H, ui::BG);
+
+    let f_title = ui::font(16, 600);
+    let f_body = ui::font(12, 400);
+    let f_tiny = ui::font(10, 400);
+    let f_value = ui::font(11, 600);
+
+    ui::text(hdc, f_title, ui::TEXT, "Settings", rect(18, 12, 200, 36), DT_LEFT);
+    ui::text(hdc, f_tiny, ui::DIM, "Neno 1.0", rect(240, 14, W - 18, 32), DT_RIGHT);
+    ui::text(hdc, f_tiny, ui::DIM, "GENERAL", rect(18, 46, 140, 64), DT_LEFT);
+
+    let water = crate::water::WaterReminder::load();
+    row(
+        hdc,
+        68,
+        "Water goal",
+        &format!("{:.1} L", water.goal_liters),
+        0x00303033,
+        ui::TEXT,
+        f_body,
+        f_value,
+    );
+
+    let autostart = crate::autostart::is_autostart();
+    row(
+        hdc,
+        116,
+        "Start with Windows",
+        if autostart { "ON" } else { "OFF" },
+        if autostart { ui::GREEN } else { ui::FAINT },
+        if autostart { 0x00000000 } else { ui::DIM },
+        f_body,
+        f_value,
+    );
+
+    let dark = crate::notch::is_dark_theme();
+    row(
+        hdc,
+        164,
+        "Theme",
+        if dark { "Dark" } else { "Light" },
+        0x00303033,
+        ui::TEXT,
+        f_body,
+        f_value,
+    );
+
+    let weather = crate::settings::Settings::load()
+        .get("weather_enabled")
+        .map(|v| v.trim() != "false")
+        .unwrap_or(true);
+    row(
+        hdc,
+        212,
+        "Weather",
+        if weather { "ON" } else { "OFF" },
+        if weather { ui::GREEN } else { ui::FAINT },
+        if weather { 0x00000000 } else { ui::DIM },
+        f_body,
+        f_value,
+    );
+
+    ui::text(
+        hdc,
+        f_tiny,
+        ui::DIM,
+        "Click a row to change  ·  Esc to close",
+        rect(18, 268, W - 18, 286),
+        DT_LEFT,
+    );
+    ui::text(
+        hdc,
+        f_tiny,
+        ui::DIM,
+        "Changes are saved automatically",
+        rect(18, 286, W - 18, 304),
+        DT_LEFT,
+    );
+
+    for f in [f_title, f_body, f_tiny, f_value] {
+        let _ = DeleteObject(HGDIOBJ(f.0));
+    }
+    let _ = EndPaint(hwnd, &ps);
+}
+
+fn repaint(hwnd: HWND) {
+    unsafe {
+        let _ = InvalidateRect(hwnd, None, false);
+    }
+}
+
+unsafe extern "system" fn settings_proc(
+    hwnd: HWND,
+    msg: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
     match msg {
         WM_PAINT => {
-            unsafe {
-                let mut ps = PAINTSTRUCT::default();
-                let hdc = BeginPaint(hwnd, &mut ps);
-                let mut rc = RECT { left: 0, top: 0, right: 320, bottom: 260 };
-                let brush = CreateSolidBrush(windows::Win32::Foundation::COLORREF(0x00202020));
-                FillRect(hdc, &rc, brush);
-                let _ = DeleteObject(windows::Win32::Graphics::Gdi::HGDIOBJ(brush.0));
-                SetBkMode(hdc, TRANSPARENT);
-                SetTextColor(hdc, windows::Win32::Foundation::COLORREF(0x00FFFFFF));
-
-                let mut y = 10i32;
-                let header: Vec<u16> = "Settings".encode_utf16().collect();
-                TextOutW(hdc, 10, y, &header);
-                y += 30;
-
-                let water = crate::water::WaterReminder::load();
-                let wline = format!("Water goal: {:.1} L (click to cycle)", water.goal_liters);
-                let wv: Vec<u16> = wline.encode_utf16().collect();
-                TextOutW(hdc, 10, y, &wv);
-                y += 24;
-
-                let auto = if crate::autostart::is_autostart() { "Autostart: ON (click to toggle)" } else { "Autostart: OFF (click to toggle)" };
-                let av: Vec<u16> = auto.encode_utf16().collect();
-                TextOutW(hdc, 10, y, &av);
-                y += 24;
-
-                let theme = if crate::notch::is_dark_theme() { "Theme: Dark (click to toggle)" } else { "Theme: Light (click to toggle)" };
-                let tv: Vec<u16> = theme.encode_utf16().collect();
-                TextOutW(hdc, 10, y, &tv);
-                y += 24;
-
-                let hint: Vec<u16> = "Click water goal to cycle 1.5/2.0/2.5/3.0".encode_utf16().collect();
-                TextOutW(hdc, 10, y, &hint);
-
-                let _ = EndPaint(hwnd, &ps);
-            }
+            unsafe { paint(hwnd); }
             LRESULT(0)
         }
         WM_LBUTTONDOWN => {
-            let y = ((lparam.0 >> 16) & 0xFFFF) as i32;
-            if y >= 30 && y < 54 {
-                // Cycle water goal
+            let y = ((lparam.0 >> 16) & 0xFFFF) as u16 as i16 as i32;
+            if (68..108).contains(&y) {
                 let mut water = crate::water::WaterReminder::load();
                 water.goal_liters = match water.goal_liters {
                     1.5 => 2.0,
@@ -111,36 +228,47 @@ unsafe extern "system" fn settings_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lp
                     _ => 1.5,
                 };
                 water.save();
-                // Also persist to settings
                 let mut settings = crate::settings::Settings::load();
                 settings.set("water_goal", &water.goal_liters.to_string());
                 settings.save();
-            } else if y >= 54 && y < 78 {
-                // Toggle autostart
+            } else if (116..156).contains(&y) {
                 let enabled = !crate::autostart::is_autostart();
                 if let Ok(exe) = std::env::current_exe() {
                     crate::autostart::set_autostart(enabled, &exe);
                 }
-            } else if y >= 78 && y < 102 {
-                // Toggle theme
+            } else if (164..204).contains(&y) {
                 let dark = !crate::notch::is_dark_theme();
                 crate::notch::set_theme(dark);
-                // Persist to settings
                 let mut settings = crate::settings::Settings::load();
                 settings.set("theme", if dark { "dark" } else { "light" });
                 settings.save();
+            } else if (212..252).contains(&y) {
+                let mut settings = crate::settings::Settings::load();
+                let currently_off = settings
+                    .get("weather_enabled")
+                    .map(|v| v.trim() == "false")
+                    .unwrap_or(false);
+                settings.set("weather_enabled", if currently_off { "true" } else { "false" });
+                settings.save();
             }
-            unsafe {
-                use windows::Win32::Graphics::Gdi::InvalidateRect;
-                InvalidateRect(hwnd, None, false);
+            repaint(hwnd);
+            LRESULT(0)
+        }
+        WM_KEYDOWN => {
+            if wparam.0 as u32
+                == windows::Win32::UI::Input::KeyboardAndMouse::VK_ESCAPE.0 as u32
+            {
+                unsafe {
+                    let _ = ShowWindow(hwnd, SW_HIDE);
+                    SETTINGS_VISIBLE.store(false, Ordering::SeqCst);
+                }
             }
             LRESULT(0)
         }
         WM_CLOSE => {
             unsafe {
-                use windows::Win32::UI::WindowsAndMessaging::ShowWindow;
-                ShowWindow(hwnd, SW_HIDE);
-                SETTINGS_VISIBLE = false;
+                let _ = ShowWindow(hwnd, SW_HIDE);
+                SETTINGS_VISIBLE.store(false, Ordering::SeqCst);
             }
             LRESULT(0)
         }

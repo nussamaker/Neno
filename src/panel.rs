@@ -1,20 +1,35 @@
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Mutex;
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
-use windows::Win32::Graphics::Gdi::{BeginPaint, CreateSolidBrush, DeleteObject, EndPaint, FillRect, SetBkMode, SetTextColor, TextOutW, PAINTSTRUCT, TRANSPARENT};
-use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, PostQuitMessage, RegisterClassExW,
-    ShowWindow, TranslateMessage, CS_HREDRAW, CS_VREDRAW, MSG, SW_HIDE, SW_SHOW, WM_CHAR, WM_CLOSE,
-    WM_DESTROY, WM_KEYDOWN, WM_LBUTTONDOWN, WM_PAINT, WM_RBUTTONDOWN, WNDCLASSEXW, WS_EX_TOOLWINDOW,
-    WS_EX_TOPMOST, WS_OVERLAPPEDWINDOW,
-};
-use windows::core::PCWSTR;
 
-#[allow(static_mut_refs)]
+use windows::core::PCWSTR;
+use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
+use windows::Win32::Graphics::Gdi::{
+    BeginPaint, DeleteObject, EndPaint, InvalidateRect, PAINTSTRUCT, DT_CENTER, DT_END_ELLIPSIS,
+    DT_LEFT, DT_RIGHT, HGDIOBJ,
+};
+use windows::Win32::UI::WindowsAndMessaging::{
+    AdjustWindowRect, CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW,
+    GetSystemMetrics, PostQuitMessage, RegisterClassExW, SetForegroundWindow, ShowWindow,
+    TranslateMessage, CS_HREDRAW, CS_VREDRAW, MSG, SM_CXSCREEN, SW_HIDE, SW_SHOW, WM_CHAR,
+    WM_CLOSE, WM_DESTROY, WM_KEYDOWN, WM_LBUTTONDOWN, WM_MOUSEWHEEL, WM_PAINT, WM_RBUTTONDOWN,
+    WNDCLASSEXW, WS_CAPTION, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_MINIMIZEBOX, WS_SYSMENU,
+    WINDOW_STYLE,
+};
+
+use crate::ui;
+
+const W: i32 = 340;
+const H: i32 = 500;
+const ROW_TOP: i32 = 42;
+const ROW_H: i32 = 24;
+const ROW_MAX: usize = 10;
+const STYLE: WINDOW_STYLE = WINDOW_STYLE(WS_CAPTION.0 | WS_SYSMENU.0 | WS_MINIMIZEBOX.0);
+
 static PANEL_VISIBLE: AtomicBool = AtomicBool::new(false);
 #[allow(static_mut_refs)]
 static mut PANEL_HWND: Option<HWND> = None;
 static INPUT: Mutex<String> = Mutex::new(String::new());
+static SCROLL: AtomicUsize = AtomicUsize::new(0);
 
 fn panel_hwnd() -> Option<HWND> {
     unsafe { PANEL_HWND }
@@ -45,18 +60,28 @@ pub fn create_panel() -> Result<HWND, windows::core::Error> {
         };
         RegisterClassExW(&wc as *const _);
 
+        let mut rc = RECT { left: 0, top: 0, right: W, bottom: H };
+        let _ = AdjustWindowRect(&mut rc, STYLE, false);
+        let outer_w = rc.right - rc.left;
+        let outer_h = rc.bottom - rc.top;
+        let sw = GetSystemMetrics(SM_CXSCREEN);
+
         let title: Vec<u16> = "Neno Panel\0".encode_utf16().collect();
-        let sw = windows::Win32::UI::WindowsAndMessaging::GetSystemMetrics(
-            windows::Win32::UI::WindowsAndMessaging::SM_CXSCREEN,
-        );
         let hwnd = CreateWindowExW(
             WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
             PCWSTR(class_name.as_ptr()),
             PCWSTR(title.as_ptr()),
-            WS_OVERLAPPEDWINDOW,
-            (sw - 340) / 2, 150, 340, 500,
-            None, None, wc.hInstance, None,
+            STYLE,
+            (sw - outer_w) / 2,
+            148,
+            outer_w,
+            outer_h,
+            None,
+            None,
+            wc.hInstance,
+            None,
         )?;
+        ui::dark_frame(hwnd);
         set_panel_hwnd(hwnd);
         Ok(hwnd)
     }
@@ -67,11 +92,11 @@ pub fn toggle_panel() {
         let now = !PANEL_VISIBLE.load(Ordering::SeqCst);
         PANEL_VISIBLE.store(now, Ordering::SeqCst);
         unsafe {
-            use windows::Win32::UI::WindowsAndMessaging::ShowWindow;
             if now {
-                ShowWindow(hwnd, SW_SHOW);
+                let _ = ShowWindow(hwnd, SW_SHOW);
+                let _ = SetForegroundWindow(hwnd);
             } else {
-                ShowWindow(hwnd, SW_HIDE);
+                let _ = ShowWindow(hwnd, SW_HIDE);
             }
         }
     }
@@ -81,67 +106,170 @@ pub fn show_panel() {
     if let Some(hwnd) = panel_hwnd() {
         PANEL_VISIBLE.store(true, Ordering::SeqCst);
         unsafe {
-            use windows::Win32::UI::WindowsAndMessaging::{SetForegroundWindow, ShowWindow, SW_SHOW};
             let _ = ShowWindow(hwnd, SW_SHOW);
             let _ = SetForegroundWindow(hwnd);
         }
     }
 }
 
-unsafe extern "system" fn panel_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+fn task_index(y: i32) -> Option<usize> {
+    if y < ROW_TOP || y >= ROW_TOP + ROW_H * ROW_MAX as i32 {
+        return None;
+    }
+    let visible = ((y - ROW_TOP) / ROW_H) as usize;
+    let len = crate::todo::TodoList::load().items.len();
+    let max_scroll = len.saturating_sub(ROW_MAX);
+    let scroll = SCROLL.load(Ordering::Relaxed).min(max_scroll);
+    let idx = scroll + visible;
+    if idx < len { Some(idx) } else { None }
+}
+
+fn repaint(hwnd: HWND) {
+    unsafe {
+        let _ = InvalidateRect(hwnd, None, false);
+    }
+}
+
+unsafe fn paint(hwnd: HWND) {
+    let mut ps = PAINTSTRUCT::default();
+    let hdc = BeginPaint(hwnd, &mut ps);
+    ui::fill(hdc, 0, 0, W, H, ui::BG);
+
+    let f_title = ui::font(16, 600);
+    let f_body = ui::font(12, 400);
+    let f_small = ui::font(11, 400);
+    let f_tiny = ui::font(10, 400);
+    let f_value = ui::font(13, 600);
+    let f_btn = ui::font(11, 600);
+
+    let todo = crate::todo::TodoList::load();
+    let open = todo.items.iter().filter(|i| !i.done).count();
+
+    ui::text(hdc, f_title, ui::TEXT, "To-Do", rect(16, 10, 160, 34), DT_LEFT);
+    let count = format!("{} open", open);
+    ui::text(hdc, f_tiny, ui::DIM, &count, rect(180, 12, W - 16, 32), DT_RIGHT);
+
+    let max_scroll = todo.items.len().saturating_sub(ROW_MAX);
+    let scroll = SCROLL.load(Ordering::Relaxed).min(max_scroll);
+    if todo.items.is_empty() {
+        ui::text(
+            hdc,
+            f_body,
+            ui::DIM,
+            "No tasks yet.",
+            rect(16, 140, W - 16, 164),
+            DT_CENTER,
+        );
+        ui::text(
+            hdc,
+            f_small,
+            ui::DIM,
+            "Add one below and press Enter.",
+            rect(16, 164, W - 16, 186),
+            DT_CENTER,
+        );
+    } else {
+        for (vi, item) in todo.items.iter().skip(scroll).take(ROW_MAX).enumerate() {
+            let y = ROW_TOP + vi as i32 * ROW_H;
+            ui::checkbox(hdc, 16, y + 5, item.done, ui::GREEN);
+            let color = if item.done { ui::DONE } else { ui::TEXT };
+            ui::text(
+                hdc,
+                f_body,
+                color,
+                &item.text,
+                rect(38, y + 2, W - 18, y + 22),
+                DT_LEFT | DT_END_ELLIPSIS,
+            );
+        }
+        if todo.items.len() > scroll + ROW_MAX {
+            let more = format!("+{} more", todo.items.len() - scroll - ROW_MAX);
+            ui::text(hdc, f_tiny, ui::DIM, &more, rect(38, 282, W - 16, 296), DT_LEFT);
+        }
+    }
+
+    ui::fill(hdc, 16, 294, W - 16, 295, 0x002A2A2D);
+
+    let water = crate::water::WaterReminder::load();
+    ui::text(hdc, f_value, ui::TEXT, "Water", rect(16, 300, 120, 324), DT_LEFT);
+    let value = format!(
+        "{:.2} / {:.1} L",
+        water.consumed_ml as f32 / 1000.0,
+        water.goal_liters
+    );
+    ui::text(hdc, f_small, ui::DIM, &value, rect(150, 302, W - 16, 324), DT_RIGHT);
+    ui::progress(hdc, 16, 328, W - 16, water.progress(), ui::GREEN, ui::TRACK);
+    let pct = format!("{:.0}% of daily goal", water.progress() * 100.0);
+    ui::text(hdc, f_tiny, ui::DIM, &pct, rect(16, 338, 240, 356), DT_LEFT);
+    if water.snoozed {
+        ui::text(
+            hdc,
+            f_tiny,
+            ui::DIM,
+            "snoozed",
+            rect(W - 100, 338, W - 16, 356),
+            DT_RIGHT,
+        );
+    }
+
+    ui::pill(hdc, 16, 360, 112, 28, ui::GREEN, 0x00000000, "Drank +250", f_btn);
+    ui::pill(hdc, 136, 360, 86, 28, ui::CARD, ui::TEXT, "Snooze", f_btn);
+    ui::pill(hdc, 230, 360, 94, 28, ui::CARD, ui::TEXT, "Reset", f_btn);
+
+    ui::fill(hdc, 16, 400, W - 16, 401, 0x002A2A2D);
+
+    ui::text(hdc, f_tiny, ui::DIM, "Add a task", rect(16, 406, 200, 424), DT_LEFT);
+    ui::outline(hdc, 16, 424, W - 16, 454, 10, ui::FAINT, ui::CARD);
+    let input = INPUT.lock().map(|s| s.clone()).unwrap_or_default();
+    if input.is_empty() {
+        ui::text(
+            hdc,
+            f_small,
+            ui::DIM,
+            "Type here and press Enter",
+            rect(28, 426, W - 28, 452),
+            DT_LEFT,
+        );
+    } else {
+        let line = format!("{}|", input);
+        ui::text(
+            hdc,
+            f_small,
+            ui::TEXT,
+            &line,
+            rect(28, 426, W - 28, 452),
+            DT_LEFT | DT_END_ELLIPSIS,
+        );
+    }
+
+    ui::text(
+        hdc,
+        f_tiny,
+        ui::DIM,
+        "Click a task to toggle  ·  right-click to remove",
+        rect(16, 462, W - 16, 480),
+        DT_LEFT,
+    );
+
+    for f in [f_title, f_body, f_small, f_tiny, f_value, f_btn] {
+        let _ = DeleteObject(HGDIOBJ(f.0));
+    }
+    let _ = EndPaint(hwnd, &ps);
+}
+
+fn rect(l: i32, t: i32, r: i32, b: i32) -> RECT {
+    RECT { left: l, top: t, right: r, bottom: b }
+}
+
+unsafe extern "system" fn panel_proc(
+    hwnd: HWND,
+    msg: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
     match msg {
         WM_PAINT => {
-            unsafe {
-                let mut ps = PAINTSTRUCT::default();
-                let hdc = BeginPaint(hwnd, &mut ps);
-                let mut rc = RECT { left: 0, top: 0, right: 340, bottom: 500 };
-                let brush = CreateSolidBrush(windows::Win32::Foundation::COLORREF(0x00202020));
-                FillRect(hdc, &rc, brush);
-                let _ = DeleteObject(windows::Win32::Graphics::Gdi::HGDIOBJ(brush.0));
-                SetBkMode(hdc, TRANSPARENT);
-                SetTextColor(hdc, windows::Win32::Foundation::COLORREF(0x00FFFFFF));
-
-                let mut y = 10i32;
-                let header: Vec<u16> = "Neno - To-Do & Water".encode_utf16().collect();
-                TextOutW(hdc, 10, y, &header);
-                y += 24;
-
-                let todo = crate::todo::TodoList::load();
-                for item in &todo.items {
-                    let prefix = if item.done { "[x] " } else { "[ ] " };
-                    let line = format!("{}{}", prefix, item.text);
-                    let v: Vec<u16> = line.encode_utf16().collect();
-                    TextOutW(hdc, 10, y, &v);
-                    y += 18;
-                }
-                if todo.items.is_empty() {
-                    let empty: Vec<u16> = "No items - type below, Enter to add".encode_utf16().collect();
-                    TextOutW(hdc, 10, y, &empty);
-                    y += 18;
-                }
-
-                y += 12;
-                let water = crate::water::WaterReminder::load();
-                let wline = format!("Water: {}/{} ml", water.consumed_ml, (water.goal_liters * 1000.0) as u32);
-                let wv: Vec<u16> = wline.encode_utf16().collect();
-                TextOutW(hdc, 10, y, &wv);
-                y += 18;
-                let prog = format!("Progress: {:.0}%", water.progress() * 100.0);
-                let pv: Vec<u16> = prog.encode_utf16().collect();
-                TextOutW(hdc, 10, y, &pv);
-                y += 18;
-                // Drink button hint
-                let hint: Vec<u16> = "Click here to drink 250ml".encode_utf16().collect();
-                TextOutW(hdc, 10, y, &hint);
-
-                y += 24;
-                let input = INPUT.lock().map(|s| s.clone()).unwrap_or_default();
-                let prompt = format!("> {}", input);
-                let iv: Vec<u16> = prompt.encode_utf16().collect();
-                TextOutW(hdc, 10, y, &iv);
-
-                let _ = EndPaint(hwnd, &ps);
-            }
+            unsafe { paint(hwnd); }
             LRESULT(0)
         }
         WM_CHAR => {
@@ -152,65 +280,83 @@ unsafe extern "system" fn panel_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpara
                     let mut todo = crate::todo::TodoList::load();
                     todo.add(text.trim().to_string());
                     todo.save();
-                    if let Ok(mut inp) = INPUT.lock() { inp.clear(); }
+                    if let Ok(mut inp) = INPUT.lock() {
+                        inp.clear();
+                    }
+                    let max_scroll = todo.items.len().saturating_sub(ROW_MAX);
+                    SCROLL.store(max_scroll, Ordering::Relaxed);
                 }
             } else if ch == 8 {
-                if let Ok(mut inp) = INPUT.lock() { inp.pop(); }
+                if let Ok(mut inp) = INPUT.lock() {
+                    inp.pop();
+                }
             } else if ch >= 32 {
                 if let Some(c) = char::from_u32(ch as u32) {
-                    if let Ok(mut inp) = INPUT.lock() { inp.push(c); }
+                    if let Ok(mut inp) = INPUT.lock() {
+                        inp.push(c);
+                    }
                 }
             }
-            unsafe {
-                use windows::Win32::Graphics::Gdi::InvalidateRect;
-                InvalidateRect(hwnd, None, false);
-            }
+            repaint(hwnd);
             LRESULT(0)
         }
         WM_LBUTTONDOWN => {
-            let y = ((lparam.0 >> 16) & 0xFFFF) as i32;
-            if y >= 34 {
-                let todo = crate::todo::TodoList::load();
-                let idx = ((y - 34) / 18) as usize;
-                if idx < todo.items.len() {
-                    let mut todo = crate::todo::TodoList::load();
-                    todo.toggle(idx);
-                    todo.save();
-                }
+            let x = (lparam.0 & 0xFFFF) as u16 as i16 as i32;
+            let y = ((lparam.0 >> 16) & 0xFFFF) as u16 as i16 as i32;
+            if let Some(idx) = task_index(y) {
+                let mut todo = crate::todo::TodoList::load();
+                todo.toggle(idx);
+                todo.save();
+                repaint(hwnd);
+                return LRESULT(0);
             }
-            // Check if click is on "drink" button area (y between water section)
-            // Simple: if y > 200, refill water
-            if y > 200 && y < 230 {
+            if (360..388).contains(&y) {
                 let mut water = crate::water::WaterReminder::load();
-                water.refill(250);
-            }
-            unsafe {
-                use windows::Win32::Graphics::Gdi::InvalidateRect;
-                InvalidateRect(hwnd, None, false);
+                if (16..128).contains(&x) {
+                    water.refill(250);
+                } else if (136..222).contains(&x) {
+                    water.snooze();
+                } else if (230..324).contains(&x) {
+                    water.consumed_ml = 0;
+                    water.snoozed = false;
+                    water.save();
+                }
+                repaint(hwnd);
             }
             LRESULT(0)
         }
         WM_RBUTTONDOWN => {
-            let y = ((lparam.0 >> 16) & 0xFFFF) as i32;
-            if y >= 34 {
-                let todo = crate::todo::TodoList::load();
-                let idx = ((y - 34) / 18) as usize;
-                if idx < todo.items.len() {
-                    let mut todo = crate::todo::TodoList::load();
-                    todo.remove(idx);
-                    todo.save();
-                }
-            }
-            unsafe {
-                use windows::Win32::Graphics::Gdi::InvalidateRect;
-                InvalidateRect(hwnd, None, false);
+            let y = ((lparam.0 >> 16) & 0xFFFF) as u16 as i16 as i32;
+            if let Some(idx) = task_index(y) {
+                let mut todo = crate::todo::TodoList::load();
+                todo.remove(idx);
+                todo.save();
+                let max_scroll = todo.items.len().saturating_sub(ROW_MAX);
+                let scroll = SCROLL.load(Ordering::Relaxed).min(max_scroll);
+                SCROLL.store(scroll, Ordering::Relaxed);
+                repaint(hwnd);
             }
             LRESULT(0)
         }
+        WM_MOUSEWHEEL => {
+            let delta = (wparam.0 >> 16) as u16 as i16;
+            let len = crate::todo::TodoList::load().items.len();
+            let max_scroll = len.saturating_sub(ROW_MAX);
+            let mut scroll = SCROLL.load(Ordering::Relaxed);
+            if delta < 0 {
+                scroll = (scroll + 1).min(max_scroll);
+            } else {
+                scroll = scroll.saturating_sub(1);
+            }
+            SCROLL.store(scroll, Ordering::Relaxed);
+            repaint(hwnd);
+            LRESULT(0)
+        }
         WM_KEYDOWN => {
-            if wparam.0 as u32 == windows::Win32::UI::Input::KeyboardAndMouse::VK_ESCAPE.0 as u32 {
+            if wparam.0 as u32
+                == windows::Win32::UI::Input::KeyboardAndMouse::VK_ESCAPE.0 as u32
+            {
                 unsafe {
-                    use windows::Win32::UI::WindowsAndMessaging::ShowWindow;
                     let _ = ShowWindow(hwnd, SW_HIDE);
                     PANEL_VISIBLE.store(false, Ordering::SeqCst);
                 }
@@ -219,8 +365,7 @@ unsafe extern "system" fn panel_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpara
         }
         WM_CLOSE => {
             unsafe {
-                use windows::Win32::UI::WindowsAndMessaging::ShowWindow;
-                ShowWindow(hwnd, SW_HIDE);
+                let _ = ShowWindow(hwnd, SW_HIDE);
                 PANEL_VISIBLE.store(false, Ordering::SeqCst);
             }
             LRESULT(0)

@@ -16,6 +16,7 @@ mod state;
 mod sysmon;
 mod todo;
 mod tray;
+mod ui;
 mod water;
 mod weather;
 mod worker;
