@@ -248,9 +248,15 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 let hdc = BeginPaint(hwnd, &mut ps);
                 // GDI fallback rendering (reliable)
                 let mut rc = RECT { left: 0, top: 0, right: 420, bottom: 90 };
-                let brush = CreateSolidBrush(windows::Win32::Foundation::COLORREF(0x00202020));
+                let brush = CreateSolidBrush(windows::Win32::Foundation::COLORREF(0x00141414));
                 FillRect(hdc, &rc, brush);
                 let _ = DeleteObject(windows::Win32::Graphics::Gdi::HGDIOBJ(brush.0));
+                // border
+                let pen = CreatePen(PS_SOLID, 1, windows::Win32::Foundation::COLORREF(0x00333333));
+                let old = SelectObject(hdc, windows::Win32::Graphics::Gdi::HGDIOBJ(pen.0));
+                let _ = windows::Win32::Graphics::Gdi::Rectangle(hdc, 0, 0, 419, 89);
+                SelectObject(hdc, old);
+                let _ = DeleteObject(windows::Win32::Graphics::Gdi::HGDIOBJ(pen.0));
                 SetBkMode(hdc, TRANSPARENT);
                 SetTextColor(hdc, windows::Win32::Foundation::COLORREF(0x00FFFFFF));
                 let text = get_text();
