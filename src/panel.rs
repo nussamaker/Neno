@@ -1,3 +1,5 @@
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{BeginPaint, CreateSolidBrush, DeleteObject, EndPaint, FillRect, SetBkMode, SetTextColor, TextOutW, PAINTSTRUCT, TRANSPARENT};
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -8,13 +10,11 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::PCWSTR;
 
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
-
 #[allow(static_mut_refs)]
 static PANEL_VISIBLE: AtomicBool = AtomicBool::new(false);
 #[allow(static_mut_refs)]
 static mut PANEL_HWND: Option<HWND> = None;
+static INPUT: Mutex<String> = Mutex::new(String::new());
 
 fn panel_hwnd() -> Option<HWND> {
     unsafe { PANEL_HWND }
@@ -23,7 +23,6 @@ fn panel_hwnd() -> Option<HWND> {
 fn set_panel_hwnd(hwnd: HWND) {
     unsafe { PANEL_HWND = Some(hwnd); }
 }
-static INPUT: Mutex<String> = Mutex::new(String::new());
 
 pub fn create_panel() -> Result<HWND, windows::core::Error> {
     unsafe {
@@ -52,7 +51,7 @@ pub fn create_panel() -> Result<HWND, windows::core::Error> {
             PCWSTR(class_name.as_ptr()),
             PCWSTR(title.as_ptr()),
             WS_OVERLAPPEDWINDOW,
-            100, 120, 340, 460,
+            100, 120, 340, 500,
             None, None, wc.hInstance, None,
         )?;
         set_panel_hwnd(hwnd);
@@ -65,6 +64,7 @@ pub fn toggle_panel() {
         let now = !PANEL_VISIBLE.load(Ordering::SeqCst);
         PANEL_VISIBLE.store(now, Ordering::SeqCst);
         unsafe {
+            use windows::Win32::UI::WindowsAndMessaging::ShowWindow;
             if now {
                 ShowWindow(hwnd, SW_SHOW);
             } else {
@@ -80,7 +80,7 @@ unsafe extern "system" fn panel_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpara
             unsafe {
                 let mut ps = PAINTSTRUCT::default();
                 let hdc = BeginPaint(hwnd, &mut ps);
-                let mut rc = RECT { left: 0, top: 0, right: 340, bottom: 460 };
+                let mut rc = RECT { left: 0, top: 0, right: 340, bottom: 500 };
                 let brush = CreateSolidBrush(windows::Win32::Foundation::COLORREF(0x00202020));
                 FillRect(hdc, &rc, brush);
                 let _ = DeleteObject(windows::Win32::Graphics::Gdi::HGDIOBJ(brush.0));
@@ -88,12 +88,12 @@ unsafe extern "system" fn panel_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpara
                 SetTextColor(hdc, windows::Win32::Foundation::COLORREF(0x00FFFFFF));
 
                 let mut y = 10i32;
-                let header: Vec<u16> = "Neno — To-Do".encode_utf16().collect();
+                let header: Vec<u16> = "Neno - To-Do & Water".encode_utf16().collect();
                 TextOutW(hdc, 10, y, &header);
                 y += 24;
 
                 let todo = crate::todo::TodoList::load();
-                for (idx, item) in todo.items.iter().enumerate() {
+                for item in &todo.items {
                     let prefix = if item.done { "[x] " } else { "[ ] " };
                     let line = format!("{}{}", prefix, item.text);
                     let v: Vec<u16> = line.encode_utf16().collect();
@@ -101,7 +101,7 @@ unsafe extern "system" fn panel_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpara
                     y += 18;
                 }
                 if todo.items.is_empty() {
-                    let empty: Vec<u16> = "No items — type below and press Enter".encode_utf16().collect();
+                    let empty: Vec<u16> = "No items - type below, Enter to add".encode_utf16().collect();
                     TextOutW(hdc, 10, y, &empty);
                     y += 18;
                 }
@@ -115,9 +115,12 @@ unsafe extern "system" fn panel_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpara
                 let prog = format!("Progress: {:.0}%", water.progress() * 100.0);
                 let pv: Vec<u16> = prog.encode_utf16().collect();
                 TextOutW(hdc, 10, y, &pv);
-                y += 24;
+                y += 18;
+                // Drink button hint
+                let hint: Vec<u16> = "Click here to drink 250ml".encode_utf16().collect();
+                TextOutW(hdc, 10, y, &hint);
 
-                // Input line
+                y += 24;
                 let input = INPUT.lock().map(|s| s.clone()).unwrap_or_default();
                 let prompt = format!("> {}", input);
                 let iv: Vec<u16> = prompt.encode_utf16().collect();
@@ -130,7 +133,6 @@ unsafe extern "system" fn panel_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpara
         WM_CHAR => {
             let ch = (wparam.0 as u32) as u16;
             if ch == 13 {
-                // Enter: add item
                 let text = INPUT.lock().map(|s| s.clone()).unwrap_or_default();
                 if !text.trim().is_empty() {
                     let mut todo = crate::todo::TodoList::load();
@@ -139,11 +141,11 @@ unsafe extern "system" fn panel_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpara
                     if let Ok(mut inp) = INPUT.lock() { inp.clear(); }
                 }
             } else if ch == 8 {
-                // Backspace
                 if let Ok(mut inp) = INPUT.lock() { inp.pop(); }
             } else if ch >= 32 {
-                let c = char::from_u32(ch as u32).unwrap_or(' ');
-                if let Ok(mut inp) = INPUT.lock() { inp.push(c); }
+                if let Some(c) = char::from_u32(ch as u32) {
+                    if let Ok(mut inp) = INPUT.lock() { inp.push(c); }
+                }
             }
             unsafe {
                 use windows::Win32::Graphics::Gdi::InvalidateRect;
@@ -153,13 +155,20 @@ unsafe extern "system" fn panel_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpara
         }
         WM_LBUTTONDOWN => {
             let y = ((lparam.0 >> 16) & 0xFFFF) as i32;
-            if y < 34 { return LRESULT(0); }
-            let todo = crate::todo::TodoList::load();
-            let idx = ((y - 34) / 18) as usize;
-            if idx < todo.items.len() {
-                let mut todo = crate::todo::TodoList::load();
-                todo.toggle(idx);
-                todo.save();
+            if y >= 34 {
+                let todo = crate::todo::TodoList::load();
+                let idx = ((y - 34) / 18) as usize;
+                if idx < todo.items.len() {
+                    let mut todo = crate::todo::TodoList::load();
+                    todo.toggle(idx);
+                    todo.save();
+                }
+            }
+            // Check if click is on "drink" button area (y between water section)
+            // Simple: if y > 200, refill water
+            if y > 200 && y < 230 {
+                let mut water = crate::water::WaterReminder::load();
+                water.refill(250);
             }
             unsafe {
                 use windows::Win32::Graphics::Gdi::InvalidateRect;
@@ -169,12 +178,14 @@ unsafe extern "system" fn panel_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpara
         }
         WM_RBUTTONDOWN => {
             let y = ((lparam.0 >> 16) & 0xFFFF) as i32;
-            if y < 34 { return LRESULT(0); }
-            let idx = ((y - 34) / 18) as usize;
-            let mut todo = crate::todo::TodoList::load();
-            if idx < todo.items.len() {
-                todo.items.remove(idx);
-                todo.save();
+            if y >= 34 {
+                let todo = crate::todo::TodoList::load();
+                let idx = ((y - 34) / 18) as usize;
+                if idx < todo.items.len() {
+                    let mut todo = crate::todo::TodoList::load();
+                    todo.remove(idx);
+                    todo.save();
+                }
             }
             unsafe {
                 use windows::Win32::Graphics::Gdi::InvalidateRect;
