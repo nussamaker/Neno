@@ -45,7 +45,7 @@ The binary will be at `target\release\neno.exe`.
 .\target\release\neno.exe
 ```
 
-A small notch window appears at the top-center of your screen. Click it to open the To-Do panel.
+A small notch window appears at the top-center of your screen. Click it to expand the card; the to-do page opens the task panel.
 
 ## Project structure
 
@@ -54,8 +54,10 @@ neno/
 ├── Cargo.toml
 ├── src/
 │   ├── main.rs          # entry point, wires all modules
-│   ├── notch.rs         # Win32 window + Direct2D/DirectWrite rendering + timer
+│   ├── notch.rs         # Win32 window + custom GDI rendering + timer
 │   ├── panel.rs         # To-Do + water panel window
+│   ├── settings_window.rs # Settings card window
+│   ├── ui.rs            # shared GDI helpers + dark DWM frame
 │   ├── media.rs         # WinRT media session + controls
 │   ├── lyrics.rs        # LRCLIB fetch + file cache
 │   ├── focus.rs         # Pomodoro state machine
@@ -68,6 +70,9 @@ neno/
 │   ├── tray.rs          # system tray icon
 │   ├── bluetooth.rs     # paired device listing
 │   ├── notifications.rs # notification count
+│   ├── weather.rs       # Open-Meteo fetch + cache
+│   ├── worker.rs        # background polling worker
+│   ├── sysmon.rs        # CPU / RAM sampling
 │   └── network.rs       # connectivity check
 ├── docs/
 │   └── REA_REPORT.md    # reverse-engineering analysis report
@@ -81,6 +86,7 @@ Optional keys in `%APPDATA%\Neno\settings.txt` (one `key=value` per line):
 | Key | Default | Meaning |
 |---|---|---|
 | `theme` | `dark` | `dark` or anything else for light |
+| `water_goal` | `2.0` | daily water goal in litres (set by the Settings window) |
 | `weather_enabled` | `true` | set to `false` to disable weather (no network call) |
 | `weather_lat` | `51.5074` | latitude, -90 to 90 (default is London) |
 | `weather_lon` | `-0.1278` | longitude, -180 to 180 |
