@@ -18,11 +18,22 @@ impl Shelf {
         self.files.clear();
         let dir = state::localappdata_shelf_dir();
         if let Ok(entries) = fs::read_dir(&dir) {
-            for e in entries.flatten() {
-                if let Some(name) = e.file_name().to_str() {
-                    self.files.push(name.to_string());
-                }
-            }
+            let mut items: Vec<(Option<std::time::SystemTime>, String)> = entries
+                .flatten()
+                .filter_map(|e| {
+                    let name = e.file_name().to_str()?.to_string();
+                    let modified = e.metadata().ok().and_then(|m| m.modified().ok());
+                    Some((modified, name))
+                })
+                .collect();
+            // Newest first; files without a timestamp go last, ties break by name.
+            items.sort_by(|a, b| match (a.0, b.0) {
+                (Some(x), Some(y)) => y.cmp(&x).then_with(|| a.1.to_lowercase().cmp(&b.1.to_lowercase())),
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (None, None) => a.1.to_lowercase().cmp(&b.1.to_lowercase()),
+            });
+            self.files = items.into_iter().map(|(_, name)| name).collect();
         }
     }
 

@@ -584,7 +584,7 @@ unsafe fn paint(hwnd: HWND) {
         PAGE_FOCUS => paint_focus(hdc, &p, f_big, f_date, f_time, f_small, f_btn, &clock, &date),
         PAGE_WATER => paint_water(hdc, &p, f_mid, f_date, f_time, f_small, f_btn, &clock, &date),
         PAGE_TODO => paint_todo(hdc, &p, f_date, f_time, f_small, f_tiny, &clock, &date),
-        _ => paint_shelf(hdc, &p, f_date, f_time, f_title, f_small, &clock, &date),
+        _ => paint_shelf(hdc, &p, f_date, f_time, f_title, f_small, f_tiny, &clock, &date),
     }
 
     paint_dots(hdc, &p, page);
@@ -921,6 +921,7 @@ unsafe fn paint_shelf(
     f_time: HFONT,
     f_title: HFONT,
     f_small: HFONT,
+    f_tiny: HFONT,
     clock: &str,
     date: &str,
 ) {
@@ -928,7 +929,7 @@ unsafe fn paint_shelf(
 
     // Drop zone: a soft card the user can throw files onto.
     let hot = hover_is(HOVER_SHELF_ZONE);
-    let (l, t, r, b) = (44, 40, EXPANDED_W - 44, 106);
+    let (l, t, r, b) = (44, 38, EXPANDED_W - 44, 108);
     let brush = CreateSolidBrush(COLORREF(p.art));
     let pen = CreatePen(PS_SOLID, if hot { 2 } else { 1 }, COLORREF(if hot { p.dim } else { p.faint }));
     let old_brush = SelectObject(hdc, HGDIOBJ(brush.0));
@@ -939,48 +940,97 @@ unsafe fn paint_shelf(
     let _ = DeleteObject(HGDIOBJ(pen.0));
     let _ = DeleteObject(HGDIOBJ(brush.0));
 
-    // Folder glyph.
-    let ix = l + 26;
-    let iy = 62;
-    let icon_color = if hot { p.text } else { p.dim };
-    let icon = CreateSolidBrush(COLORREF(icon_color));
-    let ob = SelectObject(hdc, HGDIOBJ(icon.0));
-    let op = SelectObject(hdc, GetStockObject(NULL_PEN));
-    let _ = RoundRect(hdc, ix, iy - 8, ix + 32, iy + 10, 8, 8);
-    fill(hdc, ix + 2, iy - 12, ix + 13, iy - 6, icon_color);
-    SelectObject(hdc, op);
-    SelectObject(hdc, ob);
-    let _ = DeleteObject(HGDIOBJ(icon.0));
-
     let shelf = crate::shelf::Shelf::new();
     let count = shelf.files.len();
-    let (title, hint) = if count == 0 {
-        (
-            "Drop files here".to_string(),
-            "Files you drop are copied to your shelf".to_string(),
-        )
-    } else {
-        (
-            format!("{} file{} on the shelf", count, if count == 1 { "" } else { "s" }),
-            "Drop more files, or click to open the folder".to_string(),
-        )
-    };
-    draw_text(
-        hdc,
-        f_title,
-        p.text,
-        &title,
-        RECT { left: ix + 46, top: 48, right: r - 14, bottom: 72 },
-        DT_LEFT | DT_END_ELLIPSIS,
-    );
+
+    if count == 0 {
+        // Folder glyph.
+        let ix = l + 26;
+        let iy = 62;
+        let icon_color = if hot { p.text } else { p.dim };
+        let icon = CreateSolidBrush(COLORREF(icon_color));
+        let ob = SelectObject(hdc, HGDIOBJ(icon.0));
+        let op = SelectObject(hdc, GetStockObject(NULL_PEN));
+        let _ = RoundRect(hdc, ix, iy - 8, ix + 32, iy + 10, 8, 8);
+        fill(hdc, ix + 2, iy - 12, ix + 13, iy - 6, icon_color);
+        SelectObject(hdc, op);
+        SelectObject(hdc, ob);
+        let _ = DeleteObject(HGDIOBJ(icon.0));
+
+        draw_text(
+            hdc,
+            f_title,
+            p.text,
+            "Drop files here",
+            RECT { left: ix + 46, top: 48, right: r - 14, bottom: 72 },
+            DT_LEFT | DT_END_ELLIPSIS,
+        );
+        draw_text(
+            hdc,
+            f_small,
+            p.dim,
+            "Files you drop are copied to your shelf",
+            RECT { left: ix + 46, top: 72, right: r - 14, bottom: 92 },
+            DT_LEFT | DT_END_ELLIPSIS,
+        );
+        return;
+    }
+
+    // Header with the count; the newest files are listed below it.
+    let title = format!("{} file{} on the shelf", count, if count == 1 { "" } else { "s" });
     draw_text(
         hdc,
         f_small,
-        p.dim,
-        &hint,
-        RECT { left: ix + 46, top: 72, right: r - 14, bottom: 92 },
+        p.text,
+        &title,
+        RECT { left: l + 14, top: 41, right: r - 92, bottom: 57 },
         DT_LEFT | DT_END_ELLIPSIS,
     );
+    let hint = if count > 3 {
+        format!("+{} more", count - 3)
+    } else {
+        "click to open".to_string()
+    };
+    draw_text(
+        hdc,
+        f_tiny,
+        p.dim,
+        &hint,
+        RECT { left: r - 90, top: 41, right: r - 14, bottom: 57 },
+        DT_RIGHT,
+    );
+
+    let shown = count.min(3);
+    let row_h = 14;
+    let start = 60 + (42 - shown as i32 * row_h) / 2;
+    for (i, name) in shelf.files.iter().take(3).enumerate() {
+        let y = start + i as i32 * row_h;
+        file_glyph(hdc, l + 14, y + 1, p);
+        let label = name.strip_suffix(".url").unwrap_or(name);
+        draw_text(
+            hdc,
+            f_small,
+            p.text,
+            label,
+            RECT { left: l + 32, top: y - 1, right: r - 14, bottom: y + 13 },
+            DT_LEFT | DT_END_ELLIPSIS,
+        );
+    }
+}
+
+/// Small document glyph used for shelf rows.
+unsafe fn file_glyph(hdc: HDC, x: i32, y: i32, p: &Palette) {
+    let brush = CreateSolidBrush(COLORREF(p.art));
+    let pen = CreatePen(PS_SOLID, 1, COLORREF(p.dim));
+    let ob = SelectObject(hdc, HGDIOBJ(brush.0));
+    let op = SelectObject(hdc, HGDIOBJ(pen.0));
+    let _ = RoundRect(hdc, x, y, x + 10, y + 12, 4, 4);
+    SelectObject(hdc, op);
+    SelectObject(hdc, ob);
+    let _ = DeleteObject(HGDIOBJ(pen.0));
+    let _ = DeleteObject(HGDIOBJ(brush.0));
+    line(hdc, x + 2, y + 4, x + 8, y + 4, p.dim, 1);
+    line(hdc, x + 2, y + 7, x + 8, y + 7, p.dim, 1);
 }
 
 fn dot_centers(active: usize) -> Vec<i32> {

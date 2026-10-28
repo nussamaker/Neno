@@ -12,7 +12,7 @@ Reconstructed from reverse engineering of the original "Nusa" app, rebranded to 
 - **Focus timer** — Pomodoro (25 min focus / 5 min short break / 15 min long break)
 - **Water reminder** — bottle goals (1.5 / 2.0 / 2.5 / 3.0 L), refill/snooze, progress
 - **To-do list** — dark task panel with checkboxes: add (type + Enter), toggle (click), remove (right-click), scroll with the wheel, persisted to `%APPDATA%\Neno\todo.txt`
-- **Shelf** — styled drop zone in the notch; file copy + `.url` Internet Shortcuts, drag-and-drop (WM_DROPFILES)
+- **Shelf** — styled drop zone in the notch that lists the three newest files (newest first); file copy + `.url` Internet Shortcuts, drag-and-drop (WM_DROPFILES)
 - **Autostart** — toggle `HKCU\...\Run\Neno`
 - **System tray icon** — branded Neno mark; left-click toggles the to-do panel; right-click opens a dark menu with Toggle Panel / Toggle Notch / Settings / Quit
 - **Bluetooth** — paired device listing
