@@ -246,12 +246,14 @@ struct Palette {
     bg: u32,
     text: u32,
     dim: u32,
+    sub: u32,
     faint: u32,
     green: u32,
     green_hi: u32,
     hover: u32,
     art: u32,
     track: u32,
+    media_track: u32,
 }
 
 fn palette() -> Palette {
@@ -260,24 +262,28 @@ fn palette() -> Palette {
             bg: 0x00000000,
             text: 0x00FFFFFF,
             dim: 0x00938E8E,   // #8E8E93
+            sub: 0x00595959,   // #595959 (Nusa's secondary text)
             faint: 0x003C3A3A, // #3A3A3C
             green: 0x0058D130, // #30D158
             green_hi: 0x006DE24B,
             hover: 0x004A4A4E,
             art: 0x001E1C1C,   // #1C1C1E
             track: 0x00303030,
+            media_track: 0x001B1B1B,
         }
     } else {
         Palette {
             bg: 0x00F7F5F5,    // #F5F5F7
             text: 0x001E1C1C,  // #1C1C1E
             dim: 0x00736E6E,   // #6E6E73
+            sub: 0x008F8A8A,   // #8A8A8F
             faint: 0x00DBD6D6, // #D6D6DB
             green: 0x0058D130,
             green_hi: 0x006DE24B,
             hover: 0x00CFCFD5,
             art: 0x00EDE8E8,   // #E8E8ED
             track: 0x00DCDCDC,
+            media_track: 0x00CCC7C7,
         }
     }
 }
@@ -422,8 +428,8 @@ unsafe fn status_icon(hdc: HDC, cx: i32, cy: i32, color: u32, bolt: u32) {
 
 unsafe fn play_triangle(hdc: HDC, cx: i32, cy: i32, color: u32) {
     let pts = [
-        POINT { x: cx - 4, y: cy - 7 },
-        POINT { x: cx - 4, y: cy + 7 },
+        POINT { x: cx - 5, y: cy - 7 },
+        POINT { x: cx - 5, y: cy + 7 },
         POINT { x: cx + 7, y: cy },
     ];
     filled_poly(hdc, &pts, color);
@@ -494,16 +500,29 @@ unsafe fn button(
 }
 
 unsafe fn progress_bar(hdc: HDC, l: i32, t: i32, r: i32, pct: f32, fg: u32, bg: u32) {
-    let radius = 3;
+    progress_bar_h(hdc, l, t, r, pct, fg, bg, 5);
+}
+
+unsafe fn progress_bar_h(
+    hdc: HDC,
+    l: i32,
+    t: i32,
+    r: i32,
+    pct: f32,
+    fg: u32,
+    bg: u32,
+    height: i32,
+) {
+    let radius = (height / 2).max(1);
     let track = CreateSolidBrush(COLORREF(bg));
     let old_brush = SelectObject(hdc, HGDIOBJ(track.0));
     let old_pen = SelectObject(hdc, GetStockObject(NULL_PEN));
-    let _ = RoundRect(hdc, l, t, r, t + 5, radius, radius);
+    let _ = RoundRect(hdc, l, t, r, t + height, radius, radius);
     let filled_w = ((r - l) as f32 * pct.clamp(0.0, 1.0)) as i32;
     if filled_w > 2 {
         let fill_brush = CreateSolidBrush(COLORREF(fg));
         SelectObject(hdc, HGDIOBJ(fill_brush.0));
-        let _ = RoundRect(hdc, l, t, l + filled_w.max(radius), t + 5, radius, radius);
+        let _ = RoundRect(hdc, l, t, l + filled_w.max(radius), t + height, radius, radius);
         SelectObject(hdc, old_brush);
         let _ = DeleteObject(HGDIOBJ(fill_brush.0));
     } else {
@@ -564,22 +583,23 @@ unsafe fn paint(hwnd: HWND) {
     }
 
     fill(hdc, 0, 0, EXPANDED_W, EXPANDED_H, p.bg);
-    let f_date = make_font(12, FW_NORMAL.0);
-    let f_time = make_font(13, FW_BOLD.0);
+    let f_date = make_font(13, FW_NORMAL.0);
+    let f_time = make_font(14, FW_BOLD.0);
     let f_title = make_font(15, FW_SEMIBOLD.0);
     let f_small = make_font(11, FW_NORMAL.0);
     let f_tiny = make_font(10, FW_NORMAL.0);
+    let f_label = make_font(17, FW_NORMAL.0);
     let f_big = make_font(34, FW_SEMIBOLD.0);
     let f_mid = make_font(24, FW_SEMIBOLD.0);
     let f_btn = make_font(11, FW_SEMIBOLD.0);
-    let f_glyph = make_font_face(26, FW_NORMAL.0, "Segoe UI Symbol");
+    let f_glyph = make_font_face(32, FW_NORMAL.0, "Segoe UI Symbol");
 
     let (clock, date) = now_parts();
     let page = PAGE.load(Ordering::Relaxed);
 
     match page {
         PAGE_MEDIA => paint_media(
-            hdc, &p, f_glyph, f_title, f_small, f_tiny, f_date, f_time, &clock, &date,
+            hdc, &p, f_glyph, f_title, f_small, f_label, f_date, f_time, &clock, &date,
         ),
         PAGE_FOCUS => paint_focus(hdc, &p, f_big, f_date, f_time, f_small, f_btn, &clock, &date),
         PAGE_WATER => paint_water(hdc, &p, f_mid, f_date, f_time, f_small, f_btn, &clock, &date),
@@ -588,18 +608,14 @@ unsafe fn paint(hwnd: HWND) {
     }
 
     paint_dots(hdc, &p, page);
-    if page > 0 {
-        let hot = hover_is(HOVER_CHEV_LEFT);
-        circle(hdc, 22, 70, 11, if hot { p.hover } else { p.faint });
-        chevron(hdc, 22, 70, -1, if hot { p.text } else { p.dim });
-    }
-    if page + 1 < PAGE_COUNT {
-        let hot = hover_is(HOVER_CHEV_RIGHT);
-        circle(hdc, EXPANDED_W - 22, 70, 11, if hot { p.hover } else { p.faint });
-        chevron(hdc, EXPANDED_W - 22, 70, 1, if hot { p.text } else { p.dim });
-    }
+    let left_hot = hover_is(HOVER_CHEV_LEFT);
+    circle(hdc, 22, 70, 11, if left_hot { p.hover } else { p.art });
+    chevron(hdc, 22, 70, -1, p.text);
+    let right_hot = hover_is(HOVER_CHEV_RIGHT);
+    circle(hdc, EXPANDED_W - 22, 70, 11, if right_hot { p.hover } else { p.art });
+    chevron(hdc, EXPANDED_W - 22, 70, 1, p.text);
 
-    for f in [f_date, f_time, f_title, f_small, f_tiny, f_big, f_mid, f_btn, f_glyph] {
+    for f in [f_date, f_time, f_title, f_small, f_tiny, f_label, f_big, f_mid, f_btn, f_glyph] {
         let _ = DeleteObject(HGDIOBJ(f.0));
     }
     let _ = EndPaint(hwnd, &ps);
@@ -648,7 +664,7 @@ unsafe fn paint_media(
     f_glyph: HFONT,
     f_title: HFONT,
     f_small: HFONT,
-    f_tiny: HFONT,
+    f_label: HFONT,
     f_date: HFONT,
     f_time: HFONT,
     clock: &str,
@@ -656,20 +672,20 @@ unsafe fn paint_media(
 ) {
     paint_header(hdc, p, f_date, f_time, clock, date);
 
-    // Album art placeholder.
+    // Album art placeholder, sized and placed like Nusa's 62px tile.
     let art = CreateSolidBrush(COLORREF(p.art));
     let old_brush = SelectObject(hdc, HGDIOBJ(art.0));
     let old_pen = SelectObject(hdc, GetStockObject(NULL_PEN));
-    RoundRect(hdc, 12, 12, 84, 84, 20, 20);
+    RoundRect(hdc, 44, 12, 106, 74, 14, 14);
     SelectObject(hdc, old_pen);
     SelectObject(hdc, old_brush);
     let _ = DeleteObject(HGDIOBJ(art.0));
     draw_text(
         hdc,
         f_glyph,
-        p.dim,
+        p.sub,
         "\u{266B}",
-        RECT { left: 12, top: 14, right: 84, bottom: 82 },
+        RECT { left: 44, top: 11, right: 106, bottom: 69 },
         DT_CENTER,
     );
 
@@ -679,7 +695,7 @@ unsafe fn paint_media(
         None => (media.clone(), String::new()),
     };
     let (title, artist) = if title.is_empty() {
-        ("No media".to_string(), "Play something to see it here".to_string())
+        ("No media".to_string(), String::new())
     } else {
         (title, artist)
     };
@@ -689,7 +705,7 @@ unsafe fn paint_media(
         f_title,
         p.text,
         &title,
-        RECT { left: 96, top: 36, right: EXPANDED_W - 46, bottom: 58 },
+        RECT { left: 122, top: 36, right: EXPANDED_W - 44, bottom: 60 },
         DT_LEFT | DT_END_ELLIPSIS,
     );
     let lyric = LYRICS.lock().map(|l| l.clone()).unwrap_or_default();
@@ -700,65 +716,66 @@ unsafe fn paint_media(
             f_small,
             p.dim,
             &subtitle,
-            RECT { left: 96, top: 56, right: EXPANDED_W - 46, bottom: 74 },
+            RECT { left: 122, top: 58, right: EXPANDED_W - 44, bottom: 74 },
             DT_LEFT | DT_END_ELLIPSIS,
         );
     }
 
-    // Progress row.
+    // Progress row: time labels at the edges, a thin track between them.
     let pos = PLAY_POS.load(Ordering::Relaxed);
     let dur = PLAY_LEN.load(Ordering::Relaxed);
     let has = dur > 0;
     let pct = if has { pos as f32 / dur as f32 } else { 0.0 };
     draw_text(
         hdc,
-        f_tiny,
-        p.dim,
+        f_label,
+        p.sub,
         &mmss(if has { pos } else { 0 }),
-        RECT { left: 96, top: 72, right: 132, bottom: 88 },
+        RECT { left: 44, top: 80, right: 96, bottom: 104 },
         DT_LEFT,
     );
-    progress_bar(hdc, 132, 77, EXPANDED_W - 86, pct, p.text, p.track);
+    progress_bar_h(hdc, 98, 89, 318, pct, p.text, p.media_track, 4);
     draw_text(
         hdc,
-        f_tiny,
-        p.dim,
+        f_label,
+        p.sub,
         &format!("-{}", mmss(if has { dur.saturating_sub(pos) } else { 0 })),
-        RECT { left: EXPANDED_W - 82, top: 72, right: EXPANDED_W - 39, bottom: 88 },
+        RECT { left: 320, top: 80, right: EXPANDED_W - 44, bottom: 104 },
         DT_RIGHT,
     );
 
     // Controls.
-    let cy = 102;
+    let cy = 116;
+    let enabled = !media.is_empty();
     if hover_is(HOVER_MEDIA_PREV) {
-        circle(hdc, 168, cy, 14, p.faint);
+        circle(hdc, 162, cy, 14, p.faint);
     }
     if hover_is(HOVER_MEDIA_PLAY) {
         circle(hdc, 210, cy, 14, p.faint);
     }
     if hover_is(HOVER_MEDIA_NEXT) {
-        circle(hdc, 252, cy, 14, p.faint);
+        circle(hdc, 256, cy, 14, p.faint);
     }
-    skip_icon(hdc, 168, cy, if media.is_empty() { p.faint } else { p.dim }, -1);
+    let control = if enabled { p.text } else { p.sub };
+    skip_icon(hdc, 162, cy, control, -1);
     if PLAYING.load(Ordering::Relaxed) {
-        pause_bars(hdc, 210, cy, p.text);
+        pause_bars(hdc, 210, cy, control);
     } else {
-        play_triangle(hdc, 210, cy, p.text);
+        play_triangle(hdc, 210, cy, control);
     }
-    skip_icon(hdc, 252, cy, if media.is_empty() { p.faint } else { p.dim }, 1);
-
-    // Lyrics bubble on the left.
-    let bubble = CreateSolidBrush(COLORREF(p.faint));
-    let ob = SelectObject(hdc, HGDIOBJ(bubble.0));
-    let op = SelectObject(hdc, GetStockObject(NULL_PEN));
-    RoundRect(hdc, 26, 94, 46, 110, 10, 10);
+    skip_icon(hdc, 256, cy, control, 1);
+    // Lyrics bubble on the left, outlined like the original.
+    let pen = CreatePen(PS_SOLID, 1, COLORREF(p.sub));
+    let ob = SelectObject(hdc, HGDIOBJ(pen.0));
+    let op = SelectObject(hdc, GetStockObject(NULL_BRUSH));
+    let _ = RoundRect(hdc, 66, 109, 85, 122, 8, 8);
     SelectObject(hdc, op);
     SelectObject(hdc, ob);
-    let _ = DeleteObject(HGDIOBJ(bubble.0));
-    line(hdc, 30, 99, 42, 99, p.dim, 1);
-    line(hdc, 30, 103, 42, 103, p.dim, 1);
-    let pts = [POINT { x: 30, y: 110 }, POINT { x: 30, y: 115 }, POINT { x: 36, y: 110 }];
-    filled_poly(hdc, &pts, p.faint);
+    let _ = DeleteObject(HGDIOBJ(pen.0));
+    fill(hdc, 71, 115, 74, 118, p.sub);
+    fill(hdc, 78, 115, 81, 118, p.sub);
+    let pts = [POINT { x: 68, y: 122 }, POINT { x: 69, y: 127 }, POINT { x: 74, y: 122 }];
+    filled_poly(hdc, &pts, p.sub);
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1060,12 +1077,12 @@ unsafe fn paint_dots(hdc: HDC, p: &Palette, page: usize) {
     let centers = dot_centers(page);
     for (i, cx) in centers.iter().enumerate() {
         if i == page {
-            fill(hdc, cx - 7, 129, cx + 7, 133, p.text);
+            fill(hdc, cx - 7, 131, cx + 7, 135, p.text);
         } else {
             if hover_is(HOVER_DOT + i) {
-                circle(hdc, *cx, 131, 5, p.faint);
+                circle(hdc, *cx, 133, 5, p.faint);
             }
-            fill(hdc, cx - 1, 130, cx + 2, 133, 0x00808085);
+            fill(hdc, cx - 1, 132, cx + 2, 135, 0x00737373);
         }
     }
 }
@@ -1078,7 +1095,7 @@ fn hotspot(x: i32, y: i32) -> usize {
         return 0;
     }
     let page = PAGE.load(Ordering::Relaxed);
-    if y >= 122 {
+    if y >= 127 {
         for (i, cx) in dot_centers(page).iter().enumerate() {
             if (x - cx).abs() <= 7 {
                 return HOVER_DOT + i;
@@ -1097,14 +1114,15 @@ fn hotspot(x: i32, y: i32) -> usize {
     }
     match page {
         PAGE_MEDIA => {
-            if (80..=112).contains(&y) {
-                if (144..=184).contains(&x) {
+            let has_media = MEDIA_TITLE.lock().map(|m| !m.is_empty()).unwrap_or(false);
+            if has_media && (102..=126).contains(&y) {
+                if (140..=184).contains(&x) {
                     return HOVER_MEDIA_PREV;
                 }
                 if (186..=234).contains(&x) {
                     return HOVER_MEDIA_PLAY;
                 }
-                if (236..=276).contains(&x) {
+                if (236..=280).contains(&x) {
                     return HOVER_MEDIA_NEXT;
                 }
             }
@@ -1152,7 +1170,7 @@ fn click(hwnd: HWND, x: i32, y: i32) {
     let page = PAGE.load(Ordering::Relaxed);
 
     // Page dots (bottom strip).
-    if y >= 122 {
+    if y >= 127 {
         for (i, cx) in dot_centers(page).iter().enumerate() {
             if (x - cx).abs() <= 7 {
                 PAGE.store(i, Ordering::Relaxed);
@@ -1183,12 +1201,13 @@ fn click(hwnd: HWND, x: i32, y: i32) {
     match page {
         PAGE_MEDIA => {
             // Controls row.
-            if (80..=112).contains(&y) {
-                if (144..=184).contains(&x) {
+            let has_media = MEDIA_TITLE.lock().map(|m| !m.is_empty()).unwrap_or(false);
+            if has_media && (102..=126).contains(&y) {
+                if (140..=184).contains(&x) {
                     crate::media::MediaSession::prev();
                 } else if (186..=234).contains(&x) {
                     crate::media::MediaSession::toggle();
-                } else if (236..=276).contains(&x) {
+                } else if (236..=280).contains(&x) {
                     crate::media::MediaSession::next();
                 }
             }

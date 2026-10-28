@@ -337,8 +337,8 @@ Self-description found in `.rdata`:
 A byte-preserving rebrand to **Neno** was produced from copies of the original
 artifacts (originals left untouched):
 
-- `E:\NusaSetup\renamed\NenoSetup.exe` (SHA-256 `4bfb2b4039c0c13cca50c6d84d9d2c4ef333143be51f5de3134029b5cd0dee48`, 3,318,922 bytes) — packages the current reconstruction build (GUI subsystem, no console)
-- Embedded payload `neno.exe` (2,458,624 bytes, SHA-256 `0686e79094776197ada14db6210f2405e83d364c4cbf557f4f82b5149f52f809`)
+- `E:\NusaSetup\renamed\NenoSetup.exe` (SHA-256 `fee0e23c447a6f01b75a5978586839db98dfcedc8e52a6ea4b7da5d54b298ae3`, 3,318,762 bytes) — packages the current reconstruction build (GUI subsystem, no console)
+- Embedded payload `neno.exe` (2,458,624 bytes, SHA-256 `504366fb73a1a3b8a393c7781697b1d4bda4bd0888fd3da33c130e610639141b`)
 - `E:\NusaSetup\renamed\app\neno.exe`
 
 Substitutions are same-length, so no offset shifts occur within uncompressed
