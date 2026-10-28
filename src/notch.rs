@@ -1,6 +1,6 @@
 //! The notch overlay, styled after the original Nusa app:
 //! a compact black pill at the top of the screen that expands into a
-//! rounded 420x126 card with five pages (media, focus, water, to-do, shelf).
+//! rounded 420x140 card with five pages (media, focus, water, to-do, shelf).
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Mutex, OnceLock};
@@ -877,30 +877,59 @@ unsafe fn paint_shelf(
     date: &str,
 ) {
     paint_header(hdc, p, f_date, f_time, clock, date);
+
+    // Drop zone: a soft card the user can throw files onto.
+    let (l, t, r, b) = (44, 40, EXPANDED_W - 44, 106);
+    let brush = CreateSolidBrush(COLORREF(p.art));
+    let pen = CreatePen(PS_SOLID, 1, COLORREF(p.faint));
+    let old_brush = SelectObject(hdc, HGDIOBJ(brush.0));
+    let old_pen = SelectObject(hdc, HGDIOBJ(pen.0));
+    let _ = RoundRect(hdc, l, t, r, b, 28, 28);
+    SelectObject(hdc, old_pen);
+    SelectObject(hdc, old_brush);
+    let _ = DeleteObject(HGDIOBJ(pen.0));
+    let _ = DeleteObject(HGDIOBJ(brush.0));
+
+    // Folder glyph.
+    let ix = l + 26;
+    let iy = 62;
+    let icon = CreateSolidBrush(COLORREF(p.dim));
+    let ob = SelectObject(hdc, HGDIOBJ(icon.0));
+    let op = SelectObject(hdc, GetStockObject(NULL_PEN));
+    let _ = RoundRect(hdc, ix, iy - 8, ix + 32, iy + 10, 8, 8);
+    fill(hdc, ix + 2, iy - 12, ix + 13, iy - 6, p.dim);
+    SelectObject(hdc, op);
+    SelectObject(hdc, ob);
+    let _ = DeleteObject(HGDIOBJ(icon.0));
+
+    let shelf = crate::shelf::Shelf::new();
+    let count = shelf.files.len();
+    let (title, hint) = if count == 0 {
+        (
+            "Drop files here".to_string(),
+            "Files you drop are copied to your shelf".to_string(),
+        )
+    } else {
+        (
+            format!("{} file{} on the shelf", count, if count == 1 { "" } else { "s" }),
+            "Drop more files, or click to open the folder".to_string(),
+        )
+    };
     draw_text(
         hdc,
         f_title,
         p.text,
-        "Drop files here",
-        RECT { left: 0, top: 44, right: EXPANDED_W, bottom: 68 },
-        DT_CENTER,
-    );
-    let shelf = crate::shelf::Shelf::new();
-    draw_text(
-        hdc,
-        f_small,
-        p.dim,
-        &format!("{} file(s) on the shelf", shelf.files.len()),
-        RECT { left: 0, top: 72, right: EXPANDED_W, bottom: 90 },
-        DT_CENTER,
+        &title,
+        RECT { left: ix + 46, top: 48, right: r - 14, bottom: 72 },
+        DT_LEFT | DT_END_ELLIPSIS,
     );
     draw_text(
         hdc,
         f_small,
         p.dim,
-        "Click to open the shelf folder",
-        RECT { left: 0, top: 94, right: EXPANDED_W, bottom: 112 },
-        DT_CENTER,
+        &hint,
+        RECT { left: ix + 46, top: 72, right: r - 14, bottom: 92 },
+        DT_LEFT | DT_END_ELLIPSIS,
     );
 }
 

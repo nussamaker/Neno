@@ -10,6 +10,137 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::PCWSTR;
 
+/// Paint the Neno mark (dark disc, green ring, white bolt) into a 32x32 icon.
+fn app_icon() -> windows::Win32::UI::WindowsAndMessaging::HICON {
+    use windows::Win32::Foundation::{COLORREF, RECT};
+    use windows::Win32::Graphics::Gdi::{
+        CreateBitmap, CreateCompatibleDC, CreateDIBSection, CreatePen, CreateSolidBrush, DeleteDC,
+        DeleteObject, Ellipse, FillRect, GetDC, GetStockObject, HGDIOBJ, Polygon, ReleaseDC,
+        SelectObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, NULL_BRUSH, NULL_PEN,
+        PS_SOLID,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::{CreateIconIndirect, ICONINFO};
+
+    unsafe {
+        let size = 32i32;
+        let screen = GetDC(None);
+        let bmi = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: size,
+                biHeight: -size, // top-down
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: BI_RGB.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let mut bits: *mut core::ffi::c_void = std::ptr::null_mut();
+        let Ok(color) = CreateDIBSection(screen, &bmi, DIB_RGB_COLORS, &mut bits, None, 0) else {
+            let _ = ReleaseDC(None, screen);
+            return Default::default();
+        };
+        let dc = CreateCompatibleDC(screen);
+
+        // Transparent black backdrop, then the dark disc.
+        let bg = CreateSolidBrush(COLORREF(0));
+        let rc = RECT { left: 0, top: 0, right: size, bottom: size };
+        FillRect(dc, &rc, bg);
+        let _ = DeleteObject(HGDIOBJ(bg.0));
+
+        let old_bitmap = SelectObject(dc, HGDIOBJ(color.0));
+        let disc = CreateSolidBrush(COLORREF(0x000A0A0A));
+        let old_brush = SelectObject(dc, HGDIOBJ(disc.0));
+        let old_pen = SelectObject(dc, GetStockObject(NULL_PEN));
+        let _ = Ellipse(dc, 1, 1, size - 1, size - 1);
+        SelectObject(dc, old_pen);
+        SelectObject(dc, old_brush);
+        let _ = DeleteObject(HGDIOBJ(disc.0));
+
+        // Green ring.
+        let ring_pen = CreatePen(PS_SOLID, 2, COLORREF(0x0058D130));
+        SelectObject(dc, HGDIOBJ(ring_pen.0));
+        SelectObject(dc, GetStockObject(NULL_BRUSH));
+        let _ = Ellipse(dc, 6, 6, size - 6, size - 6);
+        SelectObject(dc, old_brush);
+        let _ = DeleteObject(HGDIOBJ(ring_pen.0));
+
+        // White bolt.
+        let cx = 16;
+        let cy = 16;
+        let bolt = [
+            windows::Win32::Foundation::POINT { x: cx - 1, y: cy - 7 },
+            windows::Win32::Foundation::POINT { x: cx + 4, y: cy - 7 },
+            windows::Win32::Foundation::POINT { x: cx + 0, y: cy - 1 },
+            windows::Win32::Foundation::POINT { x: cx + 4, y: cy - 1 },
+            windows::Win32::Foundation::POINT { x: cx - 3, y: cy + 8 },
+            windows::Win32::Foundation::POINT { x: cx - 1, y: cy + 1 },
+            windows::Win32::Foundation::POINT { x: cx - 5, y: cy + 1 },
+        ];
+        let bolt_brush = CreateSolidBrush(COLORREF(0x00FFFFFF));
+        let bolt_pen = CreatePen(PS_SOLID, 1, COLORREF(0x00FFFFFF));
+        let ob = SelectObject(dc, HGDIOBJ(bolt_brush.0));
+        let op = SelectObject(dc, HGDIOBJ(bolt_pen.0));
+        let _ = Polygon(dc, &bolt);
+        SelectObject(dc, op);
+        SelectObject(dc, ob);
+        let _ = DeleteObject(HGDIOBJ(bolt_pen.0));
+        let _ = DeleteObject(HGDIOBJ(bolt_brush.0));
+
+        SelectObject(dc, old_bitmap);
+        let _ = DeleteDC(dc);
+        let _ = ReleaseDC(None, screen);
+
+        // Round alpha mask so the icon has soft edges on the taskbar.
+        let px = bits as *mut u8;
+        for y in 0..size {
+            for x in 0..size {
+                let dx = x as f32 + 0.5 - 16.0;
+                let dy = y as f32 + 0.5 - 16.0;
+                let d = (dx * dx + dy * dy).sqrt();
+                let a = ((15.4 - d).clamp(0.0, 1.0) * 255.0) as u8;
+                *px.add(((y * size + x) * 4 + 3) as usize) = a;
+            }
+        }
+
+        let zero_mask = vec![0u8; 4 * 32];
+        let mask = CreateBitmap(size, size, 1, 1, Some(zero_mask.as_ptr() as *const _));
+        let info = ICONINFO {
+            fIcon: windows::Win32::Foundation::BOOL(1),
+            xHotspot: 0,
+            yHotspot: 0,
+            hbmMask: mask,
+            hbmColor: color,
+        };
+        let icon = CreateIconIndirect(&info).unwrap_or_default();
+        let _ = DeleteObject(HGDIOBJ(mask.0));
+        let _ = DeleteObject(HGDIOBJ(color.0));
+        icon
+    }
+}
+
+/// Switch the process to dark Win32 menus (undocumented uxtheme ordinals 135/136,
+/// used by Win32 apps for years). Falls back silently to the system look.
+fn enable_dark_menus() {
+    use windows::core::PCSTR;
+    use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
+    unsafe {
+        let name: Vec<u16> = "uxtheme.dll\0".encode_utf16().collect();
+        if let Ok(uxtheme) = LoadLibraryW(PCWSTR(name.as_ptr())) {
+            if let Some(proc) = GetProcAddress(uxtheme, PCSTR(135usize as *const u8)) {
+                let set_preferred_app_mode: unsafe extern "system" fn(i32) -> i32 =
+                    std::mem::transmute(proc);
+                let _ = set_preferred_app_mode(2); // ForceDark
+            }
+            if let Some(proc) = GetProcAddress(uxtheme, PCSTR(136usize as *const u8)) {
+                let flush_menu_themes: unsafe extern "system" fn() = std::mem::transmute(proc);
+                flush_menu_themes();
+            }
+        }
+    }
+}
+
 const TRAY_MSG: u32 = WM_USER + 1;
 const CMD_TOGGLE_PANEL: usize = 1001;
 const CMD_TOGGLE_NOTCH: usize = 1002;
@@ -23,6 +154,7 @@ pub struct TrayIcon {
 impl TrayIcon {
     pub fn create() -> Result<Self, windows::core::Error> {
         unsafe {
+            enable_dark_menus();
             let class_name: Vec<u16> = "NenoTray\0".encode_utf16().collect();
             let wc = WNDCLASSEXW {
                 cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
@@ -53,7 +185,12 @@ impl TrayIcon {
 
             use windows::Win32::UI::WindowsAndMessaging::LoadIconW;
             use windows::Win32::UI::WindowsAndMessaging::IDI_APPLICATION;
-            let hicon = LoadIconW(None, IDI_APPLICATION).unwrap_or_default();
+            let painted = app_icon();
+            let hicon = if painted.is_invalid() {
+                LoadIconW(None, IDI_APPLICATION).unwrap_or_default()
+            } else {
+                painted
+            };
             let mut nid = NOTIFYICONDATAW {
                 cbSize: std::mem::size_of::<NOTIFYICONDATAW>() as u32,
                 hWnd: hwnd,
