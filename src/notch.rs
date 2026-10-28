@@ -374,7 +374,7 @@ unsafe fn line(hdc: HDC, x1: i32, y1: i32, x2: i32, y2: i32, color: u32, width: 
     let _ = DeleteObject(HGDIOBJ(pen.0));
 }
 
-unsafe fn status_icon(hdc: HDC, cx: i32, cy: i32, color: u32) {
+unsafe fn status_icon(hdc: HDC, cx: i32, cy: i32, color: u32, bolt: u32) {
     ring(hdc, cx, cy, 9, color, 2);
     let pts = [
         POINT { x: cx - 1, y: cy - 7 },
@@ -517,7 +517,7 @@ unsafe fn paint(hwnd: HWND) {
         fill(hdc, 0, 0, COLLAPSED_W, COLLAPSED_H, p.bg);
         let (clock, _) = now_parts();
         let f_clock = make_font(20, FW_SEMIBOLD.0);
-        status_icon(hdc, 27, 15, if WATER_ALERT.load(Ordering::Relaxed) { 0x0050A8FF } else { p.green });
+        status_icon(hdc, 27, 15, if WATER_ALERT.load(Ordering::Relaxed) { 0x0050A8FF } else { p.green }, p.text);
         draw_text(
             hdc,
             f_clock,
@@ -581,7 +581,7 @@ unsafe fn paint_header(
     let time_w = text_width(hdc, f_time, clock);
     let total = 18 + 7 + date_w + 8 + time_w;
     let start = (EXPANDED_W - total) / 2;
-    status_icon(hdc, start + 9, 18, p.green);
+    status_icon(hdc, start + 9, 18, p.green, p.text);
     draw_text(
         hdc,
         f_date,
