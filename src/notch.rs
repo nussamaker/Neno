@@ -12,7 +12,7 @@ use windows::Win32::Graphics::Gdi::{
     BeginPaint, CreateFontW, CreatePen, CreatePolygonRgn, CreateSolidBrush, DeleteObject, DrawTextW,
     Ellipse, EndPaint, FillRect, GetStockObject, GetTextExtentPoint32W, InvalidateRect, LineTo,
     MoveToEx, Polygon, RoundRect, SelectObject, SetBkMode, SetTextColor, SetWindowRgn, TextOutW,
-    ALTERNATE, CLEARTYPE_QUALITY, DEFAULT_CHARSET, DRAW_TEXT_FORMAT, DT_CENTER, DT_END_ELLIPSIS,
+    ALTERNATE, ANTIALIASED_QUALITY, DEFAULT_CHARSET, DRAW_TEXT_FORMAT, DT_CENTER, DT_END_ELLIPSIS,
     DT_LEFT, DT_RIGHT, DT_SINGLELINE, DT_VCENTER, FF_DONTCARE, FW_BOLD, FW_NORMAL, FW_SEMIBOLD,
     HDC, HFONT, HGDIOBJ, NULL_BRUSH, NULL_PEN, PAINTSTRUCT, PS_SOLID, TRANSPARENT,
 };
@@ -304,7 +304,7 @@ unsafe fn make_font(size: i32, weight: u32) -> HFONT {
         DEFAULT_CHARSET.0 as u32,
         0,
         0,
-        CLEARTYPE_QUALITY.0 as u32,
+        ANTIALIASED_QUALITY.0 as u32,
         FF_DONTCARE.0 as u32,
         PCWSTR(face.as_ptr()),
     )
@@ -324,7 +324,7 @@ unsafe fn make_font_face(size: i32, weight: u32, face: &str) -> HFONT {
         DEFAULT_CHARSET.0 as u32,
         0,
         0,
-        CLEARTYPE_QUALITY.0 as u32,
+        ANTIALIASED_QUALITY.0 as u32,
         FF_DONTCARE.0 as u32,
         PCWSTR(name.as_ptr()),
     )
