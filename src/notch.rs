@@ -109,6 +109,8 @@ impl Notch {
                 DragAcceptFiles(hwnd, true);
                 // 1-second timer for notch text refresh.
                 SetTimer(hwnd, 1, 1000, None);
+                // Water reminder every 30 minutes.
+                SetTimer(hwnd, 2, 1800000, None);
             }
             Ok(Self { hwnd })
         }
@@ -140,6 +142,11 @@ impl Notch {
 unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     match msg {
         WM_TIMER => {
+            if wparam.0 == 2 {
+                // Water reminder: update notch text and reset timer.
+                crate::notch::set_text("DRINK WATER! Click notch for panel");
+                return LRESULT(0);
+            }
             if let Some(focus_mutex) = FOCUS.get() {
                 if let Ok(mut f) = focus_mutex.lock() {
                     let _ = f.tick();
