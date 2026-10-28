@@ -10,7 +10,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::PCWSTR;
 
-/// Paint the Neno mark (dark disc, green ring, white bolt) into a 32x32 icon.
+/// Paint the Neno mark (dark disc, green ring, white sparkle) into a 32x32 icon.
 fn app_icon() -> windows::Win32::UI::WindowsAndMessaging::HICON {
     use windows::Win32::Foundation::{COLORREF, RECT};
     use windows::Win32::Graphics::Gdi::{
@@ -66,27 +66,28 @@ fn app_icon() -> windows::Win32::UI::WindowsAndMessaging::HICON {
         SelectObject(dc, old_brush);
         let _ = DeleteObject(HGDIOBJ(ring_pen.0));
 
-        // White bolt.
+        // White sparkle, matching the notch brand mark.
         let cx = 16;
         let cy = 16;
-        let bolt = [
-            windows::Win32::Foundation::POINT { x: cx - 1, y: cy - 7 },
-            windows::Win32::Foundation::POINT { x: cx + 4, y: cy - 7 },
-            windows::Win32::Foundation::POINT { x: cx + 0, y: cy - 1 },
-            windows::Win32::Foundation::POINT { x: cx + 4, y: cy - 1 },
-            windows::Win32::Foundation::POINT { x: cx - 3, y: cy + 8 },
-            windows::Win32::Foundation::POINT { x: cx - 1, y: cy + 1 },
-            windows::Win32::Foundation::POINT { x: cx - 5, y: cy + 1 },
+        let sparkle = [
+            windows::Win32::Foundation::POINT { x: cx, y: cy - 8 },
+            windows::Win32::Foundation::POINT { x: cx + 2, y: cy - 2 },
+            windows::Win32::Foundation::POINT { x: cx + 4, y: cy },
+            windows::Win32::Foundation::POINT { x: cx + 2, y: cy + 2 },
+            windows::Win32::Foundation::POINT { x: cx, y: cy + 8 },
+            windows::Win32::Foundation::POINT { x: cx - 2, y: cy + 2 },
+            windows::Win32::Foundation::POINT { x: cx - 4, y: cy },
+            windows::Win32::Foundation::POINT { x: cx - 2, y: cy - 2 },
         ];
-        let bolt_brush = CreateSolidBrush(COLORREF(0x00FFFFFF));
-        let bolt_pen = CreatePen(PS_SOLID, 1, COLORREF(0x00FFFFFF));
-        let ob = SelectObject(dc, HGDIOBJ(bolt_brush.0));
-        let op = SelectObject(dc, HGDIOBJ(bolt_pen.0));
-        let _ = Polygon(dc, &bolt);
+        let sparkle_brush = CreateSolidBrush(COLORREF(0x00FFFFFF));
+        let sparkle_pen = CreatePen(PS_SOLID, 1, COLORREF(0x00FFFFFF));
+        let ob = SelectObject(dc, HGDIOBJ(sparkle_brush.0));
+        let op = SelectObject(dc, HGDIOBJ(sparkle_pen.0));
+        let _ = Polygon(dc, &sparkle);
         SelectObject(dc, op);
         SelectObject(dc, ob);
-        let _ = DeleteObject(HGDIOBJ(bolt_pen.0));
-        let _ = DeleteObject(HGDIOBJ(bolt_brush.0));
+        let _ = DeleteObject(HGDIOBJ(sparkle_pen.0));
+        let _ = DeleteObject(HGDIOBJ(sparkle_brush.0));
 
         SelectObject(dc, old_bitmap);
         let _ = DeleteDC(dc);

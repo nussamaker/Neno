@@ -11,7 +11,8 @@ use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, S
 use windows::Win32::Graphics::Gdi::{
     BeginPaint, CreateFontW, CreatePen, CreatePolygonRgn, CreateSolidBrush, DeleteObject, DrawTextW,
     Ellipse, EndPaint, FillRect, GetStockObject, GetTextExtentPoint32W, InvalidateRect, LineTo,
-    MoveToEx, Polygon, RoundRect, SelectObject, SetBkMode, SetTextColor, SetWindowRgn, TextOutW,
+    MoveToEx, Polygon, RoundRect, SelectObject, SetBkMode, SetTextColor, SetViewportOrgEx, SetWindowRgn,
+    TextOutW,
     ALTERNATE, ANTIALIASED_QUALITY, DEFAULT_CHARSET, DRAW_TEXT_FORMAT, DT_CENTER, DT_END_ELLIPSIS,
     DT_LEFT, DT_RIGHT, DT_SINGLELINE, DT_VCENTER, FF_DONTCARE, FW_BOLD, FW_NORMAL, FW_SEMIBOLD,
     HDC, HFONT, HGDIOBJ, NULL_BRUSH, NULL_PEN, PAINTSTRUCT, PS_SOLID, TRANSPARENT,
@@ -31,8 +32,14 @@ use windows::Win32::UI::WindowsAndMessaging::{
 
 const COLLAPSED_W: i32 = 164;
 const COLLAPSED_H: i32 = 30;
+const COLLAPSED_BODY_W: i32 = 150;
+const COLLAPSED_SHOULDER: i32 = 7;
+const COLLAPSED_RADIUS: i32 = 16;
 const EXPANDED_W: i32 = 420;
 const EXPANDED_H: i32 = 140;
+const EXPANDED_SHOULDER: i32 = 17;
+const EXPANDED_WINDOW_W: i32 = EXPANDED_W + EXPANDED_SHOULDER * 2;
+const EXPANDED_RADIUS: i32 = 37;
 const PAGE_COUNT: usize = 5;
 const WM_MOUSELEAVE: u32 = 0x02A3;
 
@@ -191,7 +198,11 @@ pub fn collapse() {
 fn layout(hwnd: HWND, expanded: bool) {
     unsafe {
         HOVER_ID.store(0, Ordering::Relaxed);
-        let (w, h) = if expanded { (EXPANDED_W, EXPANDED_H) } else { (COLLAPSED_W, COLLAPSED_H) };
+        let (w, h) = if expanded {
+            (EXPANDED_WINDOW_W, EXPANDED_H)
+        } else {
+            (COLLAPSED_W, COLLAPSED_H)
+        };
         let sw = GetSystemMetrics(SM_CXSCREEN);
         let _ = SetWindowPos(
             hwnd,
@@ -202,7 +213,11 @@ fn layout(hwnd: HWND, expanded: bool) {
             h,
             SWP_NOACTIVATE | SWP_SHOWWINDOW,
         );
-        apply_region(hwnd, w, h, if expanded { 18 } else { 12 });
+        if expanded {
+            apply_region(hwnd, w, h, EXPANDED_W, EXPANDED_SHOULDER, EXPANDED_RADIUS);
+        } else {
+            apply_region(hwnd, w, h, COLLAPSED_BODY_W, COLLAPSED_SHOULDER, COLLAPSED_RADIUS);
+        }
         EXPANDED.store(expanded, Ordering::Relaxed);
         if !expanded {
             *LAST_INSIDE.lock().unwrap() = None;
@@ -213,27 +228,62 @@ fn layout(hwnd: HWND, expanded: bool) {
     }
 }
 
-/// Square top edge, rounded bottom corners (like the Nusa notch).
-unsafe fn apply_region(hwnd: HWND, w: i32, h: i32, r: i32) {
-    let steps = 10;
-    let mut pts: Vec<POINT> = Vec::with_capacity(steps * 2 + 4);
+/// Nusa's notch silhouette: the top edge flares wider than the body and
+/// tapers in through curved shoulders, ending in a rounded bottom.
+fn notch_points(w: i32, h: i32, body_w: i32, shoulder: i32, radius: i32) -> Vec<POINT> {
+    let left = (w - body_w) / 2;
+    let right = left + body_w;
+    let r = radius.min(h - shoulder).min(body_w / 2).max(1);
+    let steps = 12;
+    let mut pts: Vec<POINT> = Vec::with_capacity(steps * 4 + 6);
     pts.push(POINT { x: 0, y: 0 });
-    pts.push(POINT { x: w, y: 0 });
-    for i in 0..=steps {
-        let a = (i as f32) * (std::f32::consts::FRAC_PI_2 / steps as f32);
+
+    // Left shoulder.
+    let ctrl = left * 3 / 7;
+    for i in 1..=steps {
+        let t = i as f32 / steps as f32;
+        let mt = 1.0 - t;
         pts.push(POINT {
-            x: w - r + (r as f32 * a.cos()) as i32,
-            y: h - r + (r as f32 * a.sin()) as i32,
+            x: (2.0 * mt * t * ctrl as f32 + t * t * left as f32).round() as i32,
+            y: (t * t * shoulder as f32).round() as i32,
         });
     }
-    for i in 0..=steps {
+
+    pts.push(POINT { x: left, y: h - r });
+    // Bottom-left corner.
+    for i in 1..=steps {
+        let a = std::f32::consts::PI
+            - (i as f32) * (std::f32::consts::FRAC_PI_2 / steps as f32);
+        pts.push(POINT {
+            x: left + r + (r as f32 * a.cos()).round() as i32,
+            y: h - r + (r as f32 * a.sin()).round() as i32,
+        });
+    }
+    // Bottom edge and bottom-right corner.
+    for i in 1..=steps {
         let a = std::f32::consts::FRAC_PI_2
-            + (i as f32) * (std::f32::consts::FRAC_PI_2 / steps as f32);
+            - (i as f32) * (std::f32::consts::FRAC_PI_2 / steps as f32);
         pts.push(POINT {
-            x: r + (r as f32 * a.cos()) as i32,
-            y: h - r + (r as f32 * a.sin()) as i32,
+            x: right - r + (r as f32 * a.cos()).round() as i32,
+            y: h - r + (r as f32 * a.sin()).round() as i32,
         });
     }
+    pts.push(POINT { x: right, y: shoulder });
+    // Right shoulder, mirrored from the left.
+    for i in 1..=steps {
+        let t = i as f32 / steps as f32;
+        let mt = 1.0 - t;
+        pts.push(POINT {
+            x: (mt * mt * right as f32 + 2.0 * mt * t * (w - ctrl) as f32 + t * t * w as f32)
+                .round() as i32,
+            y: (mt * mt * shoulder as f32).round() as i32,
+        });
+    }
+    pts
+}
+
+unsafe fn apply_region(hwnd: HWND, w: i32, h: i32, body_w: i32, shoulder: i32, radius: i32) {
+    let pts = notch_points(w, h, body_w, shoulder, radius);
     let rgn = CreatePolygonRgn(&pts, ALTERNATE);
     if !rgn.is_invalid() {
         SetWindowRgn(hwnd, rgn, true);
@@ -251,6 +301,7 @@ struct Palette {
     green: u32,
     green_hi: u32,
     hover: u32,
+    chev: u32,
     art: u32,
     track: u32,
     media_track: u32,
@@ -267,6 +318,7 @@ fn palette() -> Palette {
             green: 0x0058D130, // #30D158
             green_hi: 0x006DE24B,
             hover: 0x004A4A4E,
+            chev: 0x00474747,   // #474747 (Nusa's chevron disc)
             art: 0x001E1C1C,   // #1C1C1E
             track: 0x00303030,
             media_track: 0x001B1B1B,
@@ -281,6 +333,7 @@ fn palette() -> Palette {
             green: 0x0058D130,
             green_hi: 0x006DE24B,
             hover: 0x00CFCFD5,
+            chev: 0x00CCC7C7,
             art: 0x00EDE8E8,   // #E8E8ED
             track: 0x00DCDCDC,
             media_track: 0x00CCC7C7,
@@ -307,26 +360,6 @@ unsafe fn make_font(size: i32, weight: u32) -> HFONT {
         ANTIALIASED_QUALITY.0 as u32,
         FF_DONTCARE.0 as u32,
         PCWSTR(face.as_ptr()),
-    )
-}
-
-unsafe fn make_font_face(size: i32, weight: u32, face: &str) -> HFONT {
-    let name: Vec<u16> = format!("{}\0", face).encode_utf16().collect();
-    CreateFontW(
-        -size,
-        0,
-        0,
-        0,
-        weight as i32,
-        0,
-        0,
-        0,
-        DEFAULT_CHARSET.0 as u32,
-        0,
-        0,
-        ANTIALIASED_QUALITY.0 as u32,
-        FF_DONTCARE.0 as u32,
-        PCWSTR(name.as_ptr()),
     )
 }
 
@@ -412,18 +445,20 @@ unsafe fn line(hdc: HDC, x1: i32, y1: i32, x2: i32, y2: i32, color: u32, width: 
     let _ = DeleteObject(HGDIOBJ(pen.0));
 }
 
-unsafe fn status_icon(hdc: HDC, cx: i32, cy: i32, color: u32, bolt: u32) {
-    ring(hdc, cx, cy, 9, color, 2);
+unsafe fn status_icon(hdc: HDC, cx: i32, cy: i32, color: u32, sparkle: u32) {
+    ring(hdc, cx, cy, 8, color, 3);
+    // Nusa's mark is a four-point sparkle, not a lightning bolt.
     let pts = [
-        POINT { x: cx - 1, y: cy - 7 },
-        POINT { x: cx + 4, y: cy - 7 },
-        POINT { x: cx + 0, y: cy - 1 },
-        POINT { x: cx + 4, y: cy - 1 },
-        POINT { x: cx - 3, y: cy + 8 },
+        POINT { x: cx, y: cy - 4 },
+        POINT { x: cx + 1, y: cy - 1 },
+        POINT { x: cx + 2, y: cy },
+        POINT { x: cx + 1, y: cy + 1 },
+        POINT { x: cx, y: cy + 3 },
         POINT { x: cx - 1, y: cy + 1 },
-        POINT { x: cx - 5, y: cy + 1 },
+        POINT { x: cx - 2, y: cy },
+        POINT { x: cx - 1, y: cy - 1 },
     ];
-    filled_poly(hdc, &pts, bolt);
+    filled_poly(hdc, &pts, sparkle);
 }
 
 unsafe fn play_triangle(hdc: HDC, cx: i32, cy: i32, color: u32) {
@@ -441,32 +476,55 @@ unsafe fn pause_bars(hdc: HDC, cx: i32, cy: i32, color: u32) {
 }
 
 unsafe fn skip_icon(hdc: HDC, cx: i32, cy: i32, color: u32, dir: i32) {
-    // dir = -1 previous, +1 next
+    // dir = -1 rewind, +1 forward: Nusa uses two filled triangles.
+    let (top, bottom) = (cy - 6, cy + 5);
     if dir < 0 {
-        fill(hdc, cx - 7, cy - 7, cx - 5, cy + 7, color);
-        let pts = [
-            POINT { x: cx + 6, y: cy - 7 },
-            POINT { x: cx + 6, y: cy + 7 },
-            POINT { x: cx - 5, y: cy },
-        ];
-        filled_poly(hdc, &pts, color);
+        filled_poly(
+            hdc,
+            &[
+                POINT { x: cx - 8, y: cy },
+                POINT { x: cx - 1, y: top },
+                POINT { x: cx - 1, y: bottom },
+            ],
+            color,
+        );
+        filled_poly(
+            hdc,
+            &[
+                POINT { x: cx + 1, y: cy },
+                POINT { x: cx + 8, y: top },
+                POINT { x: cx + 8, y: bottom },
+            ],
+            color,
+        );
     } else {
-        fill(hdc, cx + 5, cy - 7, cx + 7, cy + 7, color);
-        let pts = [
-            POINT { x: cx - 6, y: cy - 7 },
-            POINT { x: cx - 6, y: cy + 7 },
-            POINT { x: cx + 5, y: cy },
-        ];
-        filled_poly(hdc, &pts, color);
+        filled_poly(
+            hdc,
+            &[
+                POINT { x: cx - 8, y: top },
+                POINT { x: cx - 8, y: bottom },
+                POINT { x: cx - 1, y: cy },
+            ],
+            color,
+        );
+        filled_poly(
+            hdc,
+            &[
+                POINT { x: cx + 1, y: top },
+                POINT { x: cx + 1, y: bottom },
+                POINT { x: cx + 8, y: cy },
+            ],
+            color,
+        );
     }
 }
 
 unsafe fn chevron(hdc: HDC, x: i32, y: i32, dir: i32, color: u32) {
     let pen = CreatePen(PS_SOLID, 2, COLORREF(color));
     let old = SelectObject(hdc, HGDIOBJ(pen.0));
-    MoveToEx(hdc, x - 3 * dir, y - 6, None);
-    let _ = LineTo(hdc, x + 3 * dir, y);
-    let _ = LineTo(hdc, x - 3 * dir, y + 6);
+    MoveToEx(hdc, x - 2 * dir, y - 5, None);
+    let _ = LineTo(hdc, x + 2 * dir, y);
+    let _ = LineTo(hdc, x - 2 * dir, y + 5);
     SelectObject(hdc, old);
     let _ = DeleteObject(HGDIOBJ(pen.0));
 }
@@ -513,12 +571,21 @@ unsafe fn progress_bar_h(
     bg: u32,
     height: i32,
 ) {
+    let filled_w = ((r - l) as f32 * pct.clamp(0.0, 1.0)) as i32;
+    if height <= 4 {
+        // GDI's RoundRect collapses a 4px-tall pill to three scanlines, so
+        // build the capsule from fills to keep Nusa's four-row track.
+        capsule_h(hdc, l, t, r, height, bg);
+        if filled_w > 2 {
+            capsule_h(hdc, l, t, l + filled_w.max(2), height, fg);
+        }
+        return;
+    }
     let radius = (height / 2).max(1);
     let track = CreateSolidBrush(COLORREF(bg));
     let old_brush = SelectObject(hdc, HGDIOBJ(track.0));
     let old_pen = SelectObject(hdc, GetStockObject(NULL_PEN));
     let _ = RoundRect(hdc, l, t, r, t + height, radius, radius);
-    let filled_w = ((r - l) as f32 * pct.clamp(0.0, 1.0)) as i32;
     if filled_w > 2 {
         let fill_brush = CreateSolidBrush(COLORREF(fg));
         SelectObject(hdc, HGDIOBJ(fill_brush.0));
@@ -530,6 +597,13 @@ unsafe fn progress_bar_h(
     }
     SelectObject(hdc, old_pen);
     let _ = DeleteObject(HGDIOBJ(track.0));
+}
+
+/// Small horizontal capsule drawn as scanlines (see progress_bar_h).
+unsafe fn capsule_h(hdc: HDC, l: i32, t: i32, r: i32, h: i32, color: u32) {
+    let inset = (h / 2).max(1);
+    fill(hdc, l + inset, t, r - inset, t + h, color);
+    fill(hdc, l, t + 1, r, t + h - 1, color);
 }
 
 // ---------------------------------------------------------------- strings
@@ -565,9 +639,16 @@ unsafe fn paint(hwnd: HWND) {
     let expanded = EXPANDED.load(Ordering::Relaxed);
 
     if !expanded {
-        fill(hdc, 0, 0, COLLAPSED_W, COLLAPSED_H, p.bg);
+        let pts = notch_points(
+            COLLAPSED_W,
+            COLLAPSED_H,
+            COLLAPSED_BODY_W,
+            COLLAPSED_SHOULDER,
+            COLLAPSED_RADIUS,
+        );
+        filled_poly(hdc, &pts, p.bg);
         let (clock, _) = now_parts();
-        let f_clock = make_font(20, FW_SEMIBOLD.0);
+        let f_clock = make_font(17, FW_SEMIBOLD.0);
         status_icon(hdc, 27, 15, if WATER_ALERT.load(Ordering::Relaxed) { 0x0050A8FF } else { p.green }, p.text);
         draw_text(
             hdc,
@@ -582,7 +663,15 @@ unsafe fn paint(hwnd: HWND) {
         return;
     }
 
-    fill(hdc, 0, 0, EXPANDED_W, EXPANDED_H, p.bg);
+    let pts = notch_points(
+        EXPANDED_WINDOW_W,
+        EXPANDED_H,
+        EXPANDED_W,
+        EXPANDED_SHOULDER,
+        EXPANDED_RADIUS,
+    );
+    filled_poly(hdc, &pts, p.bg);
+    let _ = SetViewportOrgEx(hdc, EXPANDED_SHOULDER, 0, None);
     let f_date = make_font(13, FW_NORMAL.0);
     let f_time = make_font(14, FW_BOLD.0);
     let f_title = make_font(15, FW_SEMIBOLD.0);
@@ -592,14 +681,13 @@ unsafe fn paint(hwnd: HWND) {
     let f_big = make_font(34, FW_SEMIBOLD.0);
     let f_mid = make_font(24, FW_SEMIBOLD.0);
     let f_btn = make_font(11, FW_SEMIBOLD.0);
-    let f_glyph = make_font_face(32, FW_NORMAL.0, "Segoe UI Symbol");
 
     let (clock, date) = now_parts();
     let page = PAGE.load(Ordering::Relaxed);
 
     match page {
         PAGE_MEDIA => paint_media(
-            hdc, &p, f_glyph, f_title, f_small, f_label, f_date, f_time, &clock, &date,
+            hdc, &p, f_title, f_small, f_label, f_date, f_time, &clock, &date,
         ),
         PAGE_FOCUS => paint_focus(hdc, &p, f_big, f_date, f_time, f_small, f_btn, &clock, &date),
         PAGE_WATER => paint_water(hdc, &p, f_mid, f_date, f_time, f_small, f_btn, &clock, &date),
@@ -609,13 +697,14 @@ unsafe fn paint(hwnd: HWND) {
 
     paint_dots(hdc, &p, page);
     let left_hot = hover_is(HOVER_CHEV_LEFT);
-    circle(hdc, 22, 70, 11, if left_hot { p.hover } else { p.art });
+    circle(hdc, 22, 70, 8, if left_hot { p.sub } else { p.chev });
     chevron(hdc, 22, 70, -1, p.text);
     let right_hot = hover_is(HOVER_CHEV_RIGHT);
-    circle(hdc, EXPANDED_W - 22, 70, 11, if right_hot { p.hover } else { p.art });
-    chevron(hdc, EXPANDED_W - 22, 70, 1, p.text);
+    circle(hdc, EXPANDED_W - 25, 70, 8, if right_hot { p.sub } else { p.chev });
+    chevron(hdc, EXPANDED_W - 25, 70, 1, p.text);
 
-    for f in [f_date, f_time, f_title, f_small, f_tiny, f_label, f_big, f_mid, f_btn, f_glyph] {
+    let _ = SetViewportOrgEx(hdc, 0, 0, None);
+    for f in [f_date, f_time, f_title, f_small, f_tiny, f_label, f_big, f_mid, f_btn] {
         let _ = DeleteObject(HGDIOBJ(f.0));
     }
     let _ = EndPaint(hwnd, &ps);
@@ -632,14 +721,17 @@ unsafe fn paint_header(
     let date_w = text_width(hdc, f_date, date);
     let time_w = text_width(hdc, f_time, clock);
     let total = 18 + 7 + date_w + 8 + time_w;
-    let start = (EXPANDED_W - total) / 2;
-    status_icon(hdc, start + 9, 18, p.green, p.text);
+    // Nusa's header group sits a touch right of the card's center line.
+    let start = (EXPANDED_W - total) / 2 + 10;
+    // Calibrated against the native capture: the icon and date sit a little
+    // further right than the slot math suggests, while the time stays anchored.
+    status_icon(hdc, start + 11, 18, p.green, p.text);
     draw_text(
         hdc,
         f_date,
         p.dim,
         date,
-        RECT { left: start + 24, top: 6, right: start + 24 + date_w + 20, bottom: 30 },
+        RECT { left: start + 28, top: 6, right: start + 28 + date_w + 20, bottom: 30 },
         DT_LEFT,
     );
     draw_text(
@@ -661,7 +753,6 @@ unsafe fn paint_header(
 unsafe fn paint_media(
     hdc: HDC,
     p: &Palette,
-    f_glyph: HFONT,
     f_title: HFONT,
     f_small: HFONT,
     f_label: HFONT,
@@ -676,18 +767,30 @@ unsafe fn paint_media(
     let art = CreateSolidBrush(COLORREF(p.art));
     let old_brush = SelectObject(hdc, HGDIOBJ(art.0));
     let old_pen = SelectObject(hdc, GetStockObject(NULL_PEN));
-    RoundRect(hdc, 44, 12, 106, 74, 14, 14);
+    RoundRect(hdc, 44, 12, 107, 75, 14, 14);
     SelectObject(hdc, old_pen);
     SelectObject(hdc, old_brush);
     let _ = DeleteObject(HGDIOBJ(art.0));
-    draw_text(
-        hdc,
-        f_glyph,
-        p.sub,
-        "\u{266B}",
-        RECT { left: 44, top: 11, right: 106, bottom: 69 },
-        DT_CENTER,
-    );
+
+    // Beamed music note, traced from Nusa's tile glyph.
+    let glyph = 0x00707070;
+    fill(hdc, 71, 36, 73, 53, glyph);
+    fill(hdc, 84, 31, 86, 49, glyph);
+    let beam = [
+        POINT { x: 85, y: 31 },
+        POINT { x: 85, y: 36 },
+        POINT { x: 71, y: 37 },
+        POINT { x: 71, y: 34 },
+    ];
+    filled_poly(hdc, &beam, glyph);
+    let head = CreateSolidBrush(COLORREF(glyph));
+    let old_head = SelectObject(hdc, HGDIOBJ(head.0));
+    let head_pen = SelectObject(hdc, GetStockObject(NULL_PEN));
+    let _ = Ellipse(hdc, 64, 48, 73, 57);
+    let _ = Ellipse(hdc, 77, 46, 86, 54);
+    SelectObject(hdc, head_pen);
+    SelectObject(hdc, old_head);
+    let _ = DeleteObject(HGDIOBJ(head.0));
 
     let media = MEDIA_TITLE.lock().map(|m| m.clone()).unwrap_or_default();
     let (title, artist) = match media.split_once(" \u{2014} ") {
@@ -705,7 +808,7 @@ unsafe fn paint_media(
         f_title,
         p.text,
         &title,
-        RECT { left: 122, top: 36, right: EXPANDED_W - 44, bottom: 60 },
+        RECT { left: 122, top: 35, right: EXPANDED_W - 44, bottom: 59 },
         DT_LEFT | DT_END_ELLIPSIS,
     );
     let lyric = LYRICS.lock().map(|l| l.clone()).unwrap_or_default();
@@ -734,7 +837,7 @@ unsafe fn paint_media(
         RECT { left: 44, top: 80, right: 96, bottom: 104 },
         DT_LEFT,
     );
-    progress_bar_h(hdc, 98, 89, 318, pct, p.text, p.media_track, 4);
+    progress_bar_h(hdc, 96, 89, 318, pct, p.text, p.media_track, 4);
     draw_text(
         hdc,
         f_label,
@@ -745,7 +848,7 @@ unsafe fn paint_media(
     );
 
     // Controls.
-    let cy = 116;
+    let cy = 118;
     let enabled = !media.is_empty();
     if hover_is(HOVER_MEDIA_PREV) {
         circle(hdc, 162, cy, 14, p.faint);
@@ -765,17 +868,17 @@ unsafe fn paint_media(
     }
     skip_icon(hdc, 256, cy, control, 1);
     // Lyrics bubble on the left, outlined like the original.
-    let pen = CreatePen(PS_SOLID, 1, COLORREF(p.sub));
+    let pen = CreatePen(PS_SOLID, 1, COLORREF(p.chev));
     let ob = SelectObject(hdc, HGDIOBJ(pen.0));
     let op = SelectObject(hdc, GetStockObject(NULL_BRUSH));
-    let _ = RoundRect(hdc, 66, 109, 85, 122, 8, 8);
+    let _ = RoundRect(hdc, 66, 110, 84, 123, 8, 8);
     SelectObject(hdc, op);
     SelectObject(hdc, ob);
     let _ = DeleteObject(HGDIOBJ(pen.0));
-    fill(hdc, 71, 115, 74, 118, p.sub);
-    fill(hdc, 78, 115, 81, 118, p.sub);
-    let pts = [POINT { x: 68, y: 122 }, POINT { x: 69, y: 127 }, POINT { x: 74, y: 122 }];
-    filled_poly(hdc, &pts, p.sub);
+    fill(hdc, 71, 115, 74, 119, p.chev);
+    fill(hdc, 76, 115, 79, 119, p.chev);
+    let pts = [POINT { x: 69, y: 122 }, POINT { x: 70, y: 126 }, POINT { x: 74, y: 122 }];
+    filled_poly(hdc, &pts, p.chev);
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1053,7 +1156,7 @@ unsafe fn file_glyph(hdc: HDC, x: i32, y: i32, p: &Palette) {
 fn dot_centers(active: usize) -> Vec<i32> {
     // Active page is a 14px pill, the others are 3px dots (Nusa layout).
     let total = 14 + 6 + 3 + 5 + 3 + 5 + 3 + 5 + 3;
-    let mut x = EXPANDED_W / 2 - total / 2;
+    let mut x = EXPANDED_W / 2 - total / 2 - 1;
     let mut out = Vec::with_capacity(PAGE_COUNT);
     for i in 0..PAGE_COUNT {
         if i == active {
@@ -1077,7 +1180,7 @@ unsafe fn paint_dots(hdc: HDC, p: &Palette, page: usize) {
     let centers = dot_centers(page);
     for (i, cx) in centers.iter().enumerate() {
         if i == page {
-            fill(hdc, cx - 7, 131, cx + 7, 135, p.text);
+            fill(hdc, cx - 7, 131, cx + 8, 135, p.text);
         } else {
             if hover_is(HOVER_DOT + i) {
                 circle(hdc, *cx, 133, 5, p.faint);
@@ -1308,7 +1411,7 @@ impl Notch {
             SetTimer(hwnd, 1, 1000, None);
             SetTimer(hwnd, 2, 1800000, None);
             set_notch_hwnd(hwnd);
-            apply_region(hwnd, COLLAPSED_W, COLLAPSED_H, 12);
+            apply_region(hwnd, COLLAPSED_W, COLLAPSED_H, COLLAPSED_BODY_W, COLLAPSED_SHOULDER, COLLAPSED_RADIUS);
             Ok(Self { hwnd })
         }
     }
@@ -1396,6 +1499,11 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
         WM_MOUSEMOVE => {
             let x = (lparam.0 & 0xffff) as u16 as i16 as i32;
             let y = ((lparam.0 >> 16) & 0xffff) as u16 as i16 as i32;
+            let x = if EXPANDED.load(Ordering::Relaxed) {
+                x - EXPANDED_SHOULDER
+            } else {
+                x
+            };
             if !HOVER_TRACKING.swap(true, Ordering::Relaxed) {
                 let mut tme = TRACKMOUSEEVENT {
                     cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32,
@@ -1422,6 +1530,11 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
         WM_LBUTTONDOWN => {
             let x = (lparam.0 & 0xffff) as u16 as i16 as i32;
             let y = ((lparam.0 >> 16) & 0xffff) as u16 as i16 as i32;
+            let x = if EXPANDED.load(Ordering::Relaxed) {
+                x - EXPANDED_SHOULDER
+            } else {
+                x
+            };
             click(hwnd, x, y);
             LRESULT(0)
         }
