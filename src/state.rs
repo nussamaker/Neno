@@ -1,12 +1,21 @@
 use std::path::PathBuf;
 
 pub fn appdata_dir() -> PathBuf {
-    let base = std::env::var("APPDATA").unwrap_or_default();
+    let base = std::env::var("APPDATA").unwrap_or_else(|_| {
+        // Fallback: %USERPROFILE%\AppData\Roaming
+        std::env::var("USERPROFILE")
+            .map(|u| format!("{}\\AppData\\Roaming", u))
+            .unwrap_or_else(|_| std::env::temp_dir().to_string_lossy().to_string())
+    });
     PathBuf::from(base).join("Neno")
 }
 
 pub fn localappdata_shelf_dir() -> PathBuf {
-    let base = std::env::var("LOCALAPPDATA").unwrap_or_default();
+    let base = std::env::var("LOCALAPPDATA").unwrap_or_else(|_| {
+        std::env::var("USERPROFILE")
+            .map(|u| format!("{}\\AppData\\Local", u))
+            .unwrap_or_else(|_| std::env::temp_dir().to_string_lossy().to_string())
+    });
     PathBuf::from(base).join("Neno").join("Shelf")
 }
 

@@ -80,6 +80,12 @@ impl TrayIcon {
     }
 }
 
+impl Drop for TrayIcon {
+    fn drop(&mut self) {
+        self.remove();
+    }
+}
+
 unsafe extern "system" fn tray_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     match msg {
         TRAY_MSG => {

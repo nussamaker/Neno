@@ -34,6 +34,20 @@ pub fn set_autostart(enabled: bool, exe_path: &Path) {
 }
 
 pub fn is_autostart() -> bool {
-    // Simplified: always false in this skeleton; full impl reads the value.
-    false
+    unsafe {
+        use windows::Win32::System::Registry::{RegOpenKeyExW, RegQueryValueExW, HKEY_CURRENT_USER, KEY_READ, REG_SZ};
+        use windows::core::PCWSTR;
+        let mut key = windows::Win32::System::Registry::HKEY::default();
+        let subkey: Vec<u16> = "Software\\Microsoft\\Windows\\CurrentVersion\\Run\0".encode_utf16().collect();
+        if RegOpenKeyExW(HKEY_CURRENT_USER, PCWSTR(subkey.as_ptr()), 0, KEY_READ, &mut key).is_err() {
+            return false;
+        }
+        let name: Vec<u16> = "Neno\0".encode_utf16().collect();
+        let mut buf = vec![0u8; 512];
+        let mut size = buf.len() as u32;
+        let mut ty = windows::Win32::System::Registry::REG_VALUE_TYPE(0);
+        let res = RegQueryValueExW(key, PCWSTR(name.as_ptr()), None, Some(&mut ty), Some(buf.as_mut_ptr()), Some(&mut size));
+        let _ = windows::Win32::System::Registry::RegCloseKey(key);
+        res.is_ok() && ty.0 == REG_SZ.0
+    }
 }

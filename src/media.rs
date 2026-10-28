@@ -29,9 +29,13 @@ impl MediaSession {
     }
 
     pub fn play() {
+        Self::toggle()
+    }
+
+    pub fn toggle() {
         unsafe {
             if let Some(s) = Self::current_session_obj() {
-                let _ = s.TryPlayAsync();
+                let _ = s.TryTogglePlayPauseAsync();
             }
         }
     }

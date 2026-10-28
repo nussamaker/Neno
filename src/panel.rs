@@ -1,6 +1,6 @@
 use std::sync::Mutex;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
-use windows::Win32::Graphics::Gdi::{BeginPaint, CreateSolidBrush, EndPaint, FillRect, SetBkMode, SetTextColor, TextOutW, PAINTSTRUCT, TRANSPARENT};
+use windows::Win32::Graphics::Gdi::{BeginPaint, CreateSolidBrush, DeleteObject, EndPaint, FillRect, SetBkMode, SetTextColor, TextOutW, PAINTSTRUCT, TRANSPARENT};
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, PostQuitMessage, RegisterClassExW,
     ShowWindow, TranslateMessage, CS_HREDRAW, CS_VREDRAW, MSG, SW_HIDE, SW_SHOW, WM_CHAR, WM_CLOSE,
@@ -70,6 +70,7 @@ unsafe extern "system" fn panel_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpara
                 let mut rc = RECT { left: 0, top: 0, right: 340, bottom: 460 };
                 let brush = CreateSolidBrush(windows::Win32::Foundation::COLORREF(0x00202020));
                 FillRect(hdc, &rc, brush);
+                let _ = DeleteObject(windows::Win32::Graphics::Gdi::HGDIOBJ(brush.0));
                 SetBkMode(hdc, TRANSPARENT);
                 SetTextColor(hdc, windows::Win32::Foundation::COLORREF(0x00FFFFFF));
 
@@ -139,7 +140,7 @@ unsafe extern "system" fn panel_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpara
         }
         WM_LBUTTONDOWN => {
             let y = ((lparam.0 >> 16) & 0xFFFF) as i32;
-            // toggle item based on y (items start at y=34, 18px each)
+            if y < 34 { return LRESULT(0); }
             let todo = crate::todo::TodoList::load();
             let idx = ((y - 34) / 18) as usize;
             if idx < todo.items.len() {

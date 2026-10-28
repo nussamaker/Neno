@@ -2,14 +2,16 @@ use std::sync::Mutex;
 
 use std::sync::OnceLock;
 static NOTCH_TEXT: Mutex<String> = Mutex::new(String::new());
-static FOCUS: OnceLock<Mutex<crate::focus::FocusTimer>> = OnceLock::new();
+pub static FOCUS: OnceLock<Mutex<crate::focus::FocusTimer>> = OnceLock::new();
 static MEDIA_TITLE: Mutex<String> = Mutex::new(String::new());
 static LYRICS: Mutex<String> = Mutex::new(String::new());
 static BT_COUNT: Mutex<usize> = Mutex::new(0);
 static NOTIF_COUNT: Mutex<u32> = Mutex::new(0);
 
 pub fn init_focus() {
-    let _ = FOCUS.set(Mutex::new(crate::focus::FocusTimer::new()));
+    let mut t = crate::focus::FocusTimer::new();
+    t.start();
+    let _ = FOCUS.set(Mutex::new(t));
 }
 
 pub fn set_text(s: &str) {
@@ -58,7 +60,7 @@ use windows::Win32::Graphics::DirectWrite::{
     DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
     DWRITE_MEASURING_MODE_NATURAL,
 };
-use windows::Win32::Graphics::Gdi::{BeginPaint, CreateSolidBrush, EndPaint, FillRect, InvalidateRect, PAINTSTRUCT, SetBkMode, SetTextColor, TextOutW, TRANSPARENT};
+use windows::Win32::Graphics::Gdi::{BeginPaint, CreateSolidBrush, DeleteObject, EndPaint, FillRect, InvalidateRect, PAINTSTRUCT, SetBkMode, SetTextColor, TextOutW, TRANSPARENT};
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, PostQuitMessage,
     RegisterClassExW, SetTimer, TranslateMessage, CS_HREDRAW, CS_VREDRAW, MSG, WM_DESTROY, WM_DROPFILES,
@@ -123,7 +125,11 @@ impl Notch {
     pub fn run_message_loop() {
         unsafe {
             let mut msg = MSG::default();
-            while GetMessageW(&mut msg, None, 0, 0).as_bool() {
+            loop {
+                let ret = GetMessageW(&mut msg, None, 0, 0);
+                if ret.0 <= 0 {
+                    break;
+                }
                 let _ = TranslateMessage(&msg);
                 DispatchMessageW(&msg);
             }
@@ -141,11 +147,16 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                     let lyrics = LYRICS.lock().map(|l| l.clone()).unwrap_or_default();
                     let bt = BT_COUNT.lock().map(|c| *c).unwrap_or(0);
                     let notif = NOTIF_COUNT.lock().map(|c| *c).unwrap_or(0);
-                    let lyric_snip = if lyrics.is_empty() { String::new() } else { format!(" | {}", &lyrics[..lyrics.len().min(20)]) };
-                    let text = if media.is_empty() {
-                        format!("Focus {}s | BT {} | Notif {}{}", f.remaining.as_secs(), bt, notif, lyric_snip)
+                    let lyric_snip = if lyrics.is_empty() {
+                        String::new()
                     } else {
-                        format!("{} | Focus {}s | BT {} | Notif {}{}", media, f.remaining.as_secs(), bt, notif, lyric_snip)
+                        let s: String = lyrics.chars().take(20).collect();
+                        format!(" | {}", s)
+                    };
+                    let text = if media.is_empty() {
+                        format!("Focus {}s | BT {} | Notif {}{}", f.remaining().as_secs(), bt, notif, lyric_snip)
+                    } else {
+                        format!("{} | Focus {}s | BT {} | Notif {}{}", media, f.remaining().as_secs(), bt, notif, lyric_snip)
                     };
                     if let Ok(mut t) = NOTCH_TEXT.lock() {
                         *t = text;
@@ -163,6 +174,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 let mut rc = RECT { left: 0, top: 0, right: 420, bottom: 90 };
                 let brush = CreateSolidBrush(windows::Win32::Foundation::COLORREF(0x00202020));
                 FillRect(hdc, &rc, brush);
+                let _ = DeleteObject(windows::Win32::Graphics::Gdi::HGDIOBJ(brush.0));
                 SetBkMode(hdc, TRANSPARENT);
                 SetTextColor(hdc, windows::Win32::Foundation::COLORREF(0x00FFFFFF));
                 let text = get_text();
@@ -174,7 +186,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
             LRESULT(0)
         }
         WM_DROPFILES => {
-            crate::shelf::handle_drop_files(lparam.0 as isize);
+            crate::shelf::handle_drop_files(wparam.0 as isize);
             LRESULT(0)
         }
         WM_LBUTTONDOWN => {

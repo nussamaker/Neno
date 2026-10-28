@@ -41,6 +41,9 @@ impl WaterReminder {
     }
 
     pub fn progress(&self) -> f32 {
-        self.consumed_ml as f32 / (self.goal_liters * 1000.0)
+        if self.goal_liters <= 0.0 {
+            return 0.0;
+        }
+        (self.consumed_ml as f32 / (self.goal_liters * 1000.0)).clamp(0.0, 1.0)
     }
 }

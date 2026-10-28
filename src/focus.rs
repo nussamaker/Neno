@@ -5,9 +5,9 @@ pub enum Phase { Focus, ShortBreak, LongBreak }
 
 pub struct FocusTimer {
     pub phase: Phase,
-    pub remaining: Duration,
     pub cycles: u32,
-    started: Option<Instant>,
+    phase_start: Option<Instant>,
+    paused_elapsed: Duration,
     paused: bool,
 }
 
@@ -15,10 +15,10 @@ impl Default for FocusTimer {
     fn default() -> Self {
         Self {
             phase: Phase::Focus,
-            remaining: Duration::from_secs(25 * 60),
             cycles: 0,
-            started: None,
-            paused: false,
+            phase_start: None,
+            paused_elapsed: Duration::ZERO,
+            paused: true,
         }
     }
 }
@@ -34,26 +34,44 @@ impl FocusTimer {
         }
     }
 
+    pub fn remaining(&self) -> Duration {
+        let dur = Self::phase_duration(self.phase);
+        if self.paused {
+            dur.saturating_sub(self.paused_elapsed)
+        } else if let Some(start) = self.phase_start {
+            let elapsed = self.paused_elapsed + start.elapsed();
+            dur.saturating_sub(elapsed)
+        } else {
+            dur.saturating_sub(self.paused_elapsed)
+        }
+    }
+
+    pub fn is_running(&self) -> bool {
+        self.phase_start.is_some() && !self.paused
+    }
+
     pub fn start(&mut self) {
-        self.started = Some(Instant::now());
+        if self.phase_start.is_none() {
+            self.phase_start = Some(Instant::now());
+        }
         self.paused = false;
     }
 
     pub fn pause(&mut self) {
-        if let Some(s) = self.started.take() {
-            self.remaining = self.remaining.saturating_sub(s.elapsed());
+        if let Some(start) = self.phase_start.take() {
+            self.paused_elapsed += start.elapsed();
         }
         self.paused = true;
     }
 
     pub fn tick(&mut self) -> bool {
         // returns true if phase just completed
-        if self.paused || self.started.is_none() { return false; }
-        let s = self.started.unwrap();
-        let elapsed = s.elapsed();
-        if elapsed >= self.remaining {
-            self.started = None;
-            self.paused = true;
+        if self.paused || self.phase_start.is_none() {
+            return false;
+        }
+        let dur = Self::phase_duration(self.phase);
+        let elapsed = self.paused_elapsed + self.phase_start.unwrap().elapsed();
+        if elapsed >= dur {
             // advance phase
             match self.phase {
                 Phase::Focus => {
@@ -62,18 +80,20 @@ impl FocusTimer {
                 }
                 _ => self.phase = Phase::Focus,
             }
-            self.remaining = Self::phase_duration(self.phase);
+            self.phase_start = None;
+            self.paused_elapsed = Duration::ZERO;
+            self.paused = true;
             true
         } else {
-            self.remaining = Self::phase_duration(self.phase) - elapsed;
             false
         }
     }
 
     pub fn reset(&mut self) {
         self.phase = Phase::Focus;
-        self.remaining = Self::phase_duration(Phase::Focus);
-        self.started = None;
-        self.paused = false;
+        self.cycles = 0;
+        self.phase_start = None;
+        self.paused_elapsed = Duration::ZERO;
+        self.paused = true;
     }
 }

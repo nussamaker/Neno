@@ -4,17 +4,29 @@ use crate::state;
 pub fn cache_path(track: &str, artist: &str) -> std::path::PathBuf {
     let dir = state::appdata_dir().join("lyrics");
     let _ = fs::create_dir_all(&dir);
-    let safe = format!("{}_{}", artist, track)
-        .chars()
-        .map(|c| if c.is_alphanumeric() { c } else { '_' })
-        .collect::<String>();
-    dir.join(format!("{}.lrc", safe))
+    // Use a hash to avoid collisions from punctuation differences.
+    let key = format!("{}::{}", artist, track);
+    let hash = simple_hash(&key);
+    dir.join(format!("{:x}.lrc", hash))
+}
+
+fn simple_hash(s: &str) -> u64 {
+    // FNV-1a 64-bit
+    let mut h: u64 = 0xcbf29ce484222325;
+    for b in s.bytes() {
+        h ^= b as u64;
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    h
 }
 
 pub fn fetch_lyrics(track: &str, artist: &str) -> Option<String> {
-    // Check cache first.
     let cp = cache_path(track, artist);
+    // Cache: empty file = known miss; non-empty = lyrics.
     if let Ok(cached) = fs::read_to_string(&cp) {
+        if cached == "MISS" {
+            return None;
+        }
         if !cached.is_empty() {
             return Some(cached);
         }
@@ -30,16 +42,28 @@ pub fn fetch_lyrics(track: &str, artist: &str) -> Option<String> {
         .call()
         .ok()?;
     let body = resp.into_string().ok()?;
-    // LRCLIB returns a JSON array; take first result's "plainLyrics" or "syncedLyrics".
-    let text = extract_lyrics(&body);
-    if let Some(ref l) = text {
-        let _ = fs::write(&cp, l);
+
+    // Parse JSON array; take first result.
+    let json: serde_json::Value = serde_json::from_str(&body).ok()?;
+    let arr = json.as_array()?;
+    let first = arr.first()?;
+    // Prefer syncedLyrics, then plainLyrics.
+    let lyrics = first.get("syncedLyrics")
+        .or_else(|| first.get("plainLyrics"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .filter(|s| !s.trim().is_empty() && s != "null");
+
+    // Cache result (including misses).
+    let _ = fs::create_dir_all(cp.parent().unwrap());
+    match &lyrics {
+        Some(l) => { let _ = fs::write(&cp, l); }
+        None => { let _ = fs::write(&cp, "MISS"); }
     }
-    text
+    lyrics
 }
 
 fn urlencoding(s: &str) -> String {
-    // Minimal percent-encoding for query values.
     let mut out = String::new();
     for b in s.bytes() {
         match b {
@@ -51,36 +75,4 @@ fn urlencoding(s: &str) -> String {
         }
     }
     out
-}
-
-fn extract_lyrics(json: &str) -> Option<String> {
-    // Crude extraction: find "plainLyrics":"..." or "syncedLyrics":"...".
-    for key in ["syncedLyrics", "plainLyrics"] {
-        let needle = format!("\"{}\":\"", key);
-        if let Some(i) = json.find(&needle) {
-            let start = i + needle.len();
-            // find closing quote (handle escaped \")
-            let mut j = start;
-            let bytes = json.as_bytes();
-            while j < bytes.len() {
-                if bytes[j] == b'\\' {
-                    j += 2;
-                    continue;
-                }
-                if bytes[j] == b'"' {
-                    break;
-                }
-                j += 1;
-            }
-            if j < bytes.len() {
-                let raw = &json[start..j];
-                // unescape minimal
-                let unescaped = raw.replace("\\n", "\n").replace("\\\"", "\"");
-                if !unescaped.trim().is_empty() && unescaped != "null" {
-                    return Some(unescaped);
-                }
-            }
-        }
-    }
-    None
 }
