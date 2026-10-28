@@ -7,13 +7,16 @@ use windows::Win32::Graphics::Gdi::{
     BeginPaint, DeleteObject, EndPaint, InvalidateRect, PAINTSTRUCT, DT_CENTER, DT_END_ELLIPSIS,
     DT_LEFT, DT_RIGHT, HGDIOBJ,
 };
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    TrackMouseEvent, TME_LEAVE, TRACKMOUSEEVENT,
+};
 use windows::Win32::UI::WindowsAndMessaging::{
     AdjustWindowRect, CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW,
     GetSystemMetrics, PostQuitMessage, RegisterClassExW, SetForegroundWindow, ShowWindow,
     TranslateMessage, CS_HREDRAW, CS_VREDRAW, MSG, SM_CXSCREEN, SW_HIDE, SW_SHOW, WM_CHAR,
-    WM_CLOSE, WM_DESTROY, WM_KEYDOWN, WM_LBUTTONDOWN, WM_MOUSEWHEEL, WM_PAINT, WM_RBUTTONDOWN,
-    WNDCLASSEXW, WS_CAPTION, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_MINIMIZEBOX, WS_SYSMENU,
-    WINDOW_STYLE,
+    WM_CLOSE, WM_DESTROY, WM_KEYDOWN, WM_LBUTTONDOWN, WM_MOUSEMOVE, WM_MOUSEWHEEL,
+    WM_PAINT, WM_RBUTTONDOWN, WNDCLASSEXW, WS_CAPTION, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
+    WS_MINIMIZEBOX, WS_SYSMENU, WINDOW_STYLE,
 };
 
 use crate::ui;
@@ -23,6 +26,7 @@ const H: i32 = 500;
 const ROW_TOP: i32 = 42;
 const ROW_H: i32 = 24;
 const ROW_MAX: usize = 10;
+const WM_MOUSELEAVE: u32 = 0x02A3;
 const STYLE: WINDOW_STYLE = WINDOW_STYLE(WS_CAPTION.0 | WS_SYSMENU.0 | WS_MINIMIZEBOX.0);
 
 static PANEL_VISIBLE: AtomicBool = AtomicBool::new(false);
@@ -30,6 +34,14 @@ static PANEL_VISIBLE: AtomicBool = AtomicBool::new(false);
 static mut PANEL_HWND: Option<HWND> = None;
 static INPUT: Mutex<String> = Mutex::new(String::new());
 static SCROLL: AtomicUsize = AtomicUsize::new(0);
+static HOVER: AtomicUsize = AtomicUsize::new(0);
+static HOVER_TRACKING: AtomicBool = AtomicBool::new(false);
+
+const HOVER_DRANK: usize = 2;
+const HOVER_SNOOZE: usize = 3;
+const HOVER_RESET: usize = 4;
+const HOVER_INPUT: usize = 5;
+const HOVER_TASK: usize = 1000;
 
 fn panel_hwnd() -> Option<HWND> {
     unsafe { PANEL_HWND }
@@ -97,6 +109,8 @@ pub fn toggle_panel() {
                 let _ = SetForegroundWindow(hwnd);
             } else {
                 let _ = ShowWindow(hwnd, SW_HIDE);
+                HOVER.store(0, Ordering::Relaxed);
+                HOVER_TRACKING.store(false, Ordering::Relaxed);
             }
         }
     }
@@ -124,6 +138,28 @@ fn task_index(y: i32) -> Option<usize> {
     if idx < len { Some(idx) } else { None }
 }
 
+/// Which control is under the pointer (used for hover feedback).
+fn hover_target(x: i32, y: i32) -> usize {
+    if (360..388).contains(&y) {
+        if (16..128).contains(&x) {
+            return HOVER_DRANK;
+        }
+        if (136..222).contains(&x) {
+            return HOVER_SNOOZE;
+        }
+        if (230..324).contains(&x) {
+            return HOVER_RESET;
+        }
+    }
+    if (424..454).contains(&y) && (16..=(W - 16)).contains(&x) {
+        return HOVER_INPUT;
+    }
+    if let Some(idx) = task_index(y) {
+        return HOVER_TASK + idx;
+    }
+    0
+}
+
 fn repaint(hwnd: HWND) {
     unsafe {
         let _ = InvalidateRect(hwnd, None, false);
@@ -141,6 +177,7 @@ unsafe fn paint(hwnd: HWND) {
     let f_tiny = ui::font(10, 400);
     let f_value = ui::font(13, 600);
     let f_btn = ui::font(11, 600);
+    let hover = HOVER.load(Ordering::Relaxed);
 
     let todo = crate::todo::TodoList::load();
     let open = todo.items.iter().filter(|i| !i.done).count();
@@ -171,6 +208,9 @@ unsafe fn paint(hwnd: HWND) {
     } else {
         for (vi, item) in todo.items.iter().skip(scroll).take(ROW_MAX).enumerate() {
             let y = ROW_TOP + vi as i32 * ROW_H;
+            if hover == HOVER_TASK + scroll + vi {
+                ui::round(hdc, 10, y, W - 10, y + ROW_H, 8, ui::ROW_HOVER);
+            }
             ui::checkbox(hdc, 16, y + 5, item.done, ui::GREEN);
             let color = if item.done { ui::DONE } else { ui::TEXT };
             ui::text(
@@ -212,14 +252,14 @@ unsafe fn paint(hwnd: HWND) {
         );
     }
 
-    ui::pill(hdc, 16, 360, 112, 28, ui::GREEN, 0x00000000, "Drank +250", f_btn);
-    ui::pill(hdc, 136, 360, 86, 28, ui::CARD, ui::TEXT, "Snooze", f_btn);
-    ui::pill(hdc, 230, 360, 94, 28, ui::CARD, ui::TEXT, "Reset", f_btn);
+    ui::pill(hdc, 16, 360, 112, 28, if hover == HOVER_DRANK { ui::GREEN_HI } else { ui::GREEN }, 0x00000000, "Drank +250", f_btn);
+    ui::pill(hdc, 136, 360, 86, 28, if hover == HOVER_SNOOZE { ui::HOVER } else { ui::CARD }, ui::TEXT, "Snooze", f_btn);
+    ui::pill(hdc, 230, 360, 94, 28, if hover == HOVER_RESET { ui::HOVER } else { ui::CARD }, ui::TEXT, "Reset", f_btn);
 
     ui::fill(hdc, 16, 400, W - 16, 401, 0x002A2A2D);
 
     ui::text(hdc, f_tiny, ui::DIM, "Add a task", rect(16, 406, 200, 424), DT_LEFT);
-    ui::outline(hdc, 16, 424, W - 16, 454, 10, ui::FAINT, ui::CARD);
+    ui::outline(hdc, 16, 424, W - 16, 454, 10, if hover == HOVER_INPUT { ui::DIM } else { ui::FAINT }, ui::CARD);
     let input = INPUT.lock().map(|s| s.clone()).unwrap_or_default();
     if input.is_empty() {
         ui::text(
@@ -270,6 +310,32 @@ unsafe extern "system" fn panel_proc(
     match msg {
         WM_PAINT => {
             unsafe { paint(hwnd); }
+            LRESULT(0)
+        }
+        WM_MOUSEMOVE => {
+            let x = (lparam.0 & 0xFFFF) as u16 as i16 as i32;
+            let y = ((lparam.0 >> 16) & 0xFFFF) as u16 as i16 as i32;
+            if !HOVER_TRACKING.swap(true, Ordering::Relaxed) {
+                let mut tme = TRACKMOUSEEVENT {
+                    cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32,
+                    dwFlags: TME_LEAVE,
+                    hwndTrack: hwnd,
+                    dwHoverTime: 0,
+                };
+                let _ = unsafe { TrackMouseEvent(&mut tme) };
+            }
+            let id = hover_target(x, y);
+            if id != HOVER.load(Ordering::Relaxed) {
+                HOVER.store(id, Ordering::Relaxed);
+                repaint(hwnd);
+            }
+            LRESULT(0)
+        }
+        WM_MOUSELEAVE => {
+            HOVER_TRACKING.store(false, Ordering::Relaxed);
+            if HOVER.swap(0, Ordering::Relaxed) != 0 {
+                repaint(hwnd);
+            }
             LRESULT(0)
         }
         WM_CHAR => {
@@ -349,6 +415,7 @@ unsafe extern "system" fn panel_proc(
                 scroll = scroll.saturating_sub(1);
             }
             SCROLL.store(scroll, Ordering::Relaxed);
+            HOVER.store(0, Ordering::Relaxed);
             repaint(hwnd);
             LRESULT(0)
         }

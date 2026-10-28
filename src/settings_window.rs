@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
@@ -6,23 +6,29 @@ use windows::Win32::Graphics::Gdi::{
     BeginPaint, DeleteObject, EndPaint, InvalidateRect, PAINTSTRUCT, DT_LEFT, DT_RIGHT, HDC,
     HGDIOBJ,
 };
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    TrackMouseEvent, TME_LEAVE, TRACKMOUSEEVENT,
+};
 use windows::Win32::UI::WindowsAndMessaging::{
     AdjustWindowRect, CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW,
     GetSystemMetrics, PostQuitMessage, RegisterClassExW, SetForegroundWindow, ShowWindow,
     TranslateMessage, CS_HREDRAW, CS_VREDRAW, MSG, SM_CXSCREEN, SW_HIDE, SW_SHOW, WM_CLOSE,
-    WM_DESTROY, WM_KEYDOWN, WM_LBUTTONDOWN, WM_PAINT, WNDCLASSEXW, WS_CAPTION, WS_EX_TOOLWINDOW,
-    WS_EX_TOPMOST, WS_MINIMIZEBOX, WS_SYSMENU, WINDOW_STYLE,
+    WM_DESTROY, WM_KEYDOWN, WM_LBUTTONDOWN, WM_MOUSEMOVE, WM_PAINT, WNDCLASSEXW,
+    WS_CAPTION, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_MINIMIZEBOX, WS_SYSMENU, WINDOW_STYLE,
 };
 
 use crate::ui;
 
 const W: i32 = 360;
 const H: i32 = 330;
+const WM_MOUSELEAVE: u32 = 0x02A3;
 const STYLE: WINDOW_STYLE = WINDOW_STYLE(WS_CAPTION.0 | WS_SYSMENU.0 | WS_MINIMIZEBOX.0);
 
 static SETTINGS_VISIBLE: AtomicBool = AtomicBool::new(false);
 #[allow(static_mut_refs)]
 static mut SETTINGS_HWND: Option<HWND> = None;
+static HOVER: AtomicUsize = AtomicUsize::new(0);
+static HOVER_TRACKING: AtomicBool = AtomicBool::new(false);
 
 fn settings_hwnd() -> Option<HWND> {
     unsafe { SETTINGS_HWND }
@@ -86,6 +92,8 @@ pub fn toggle_settings() {
                 let _ = SetForegroundWindow(hwnd);
             } else {
                 let _ = ShowWindow(hwnd, SW_HIDE);
+                HOVER.store(0, Ordering::Relaxed);
+                HOVER_TRACKING.store(false, Ordering::Relaxed);
             }
         }
     }
@@ -95,6 +103,20 @@ fn rect(l: i32, t: i32, r: i32, b: i32) -> RECT {
     RECT { left: l, top: t, right: r, bottom: b }
 }
 
+fn hover_target(y: i32) -> usize {
+    if (68..108).contains(&y) {
+        1
+    } else if (116..156).contains(&y) {
+        2
+    } else if (164..204).contains(&y) {
+        3
+    } else if (212..252).contains(&y) {
+        4
+    } else {
+        0
+    }
+}
+
 unsafe fn row(
     hdc: HDC,
     top: i32,
@@ -102,10 +124,11 @@ unsafe fn row(
     value: &str,
     pill_bg: u32,
     pill_fg: u32,
+    hot: bool,
     f_body: windows::Win32::Graphics::Gdi::HFONT,
     f_value: windows::Win32::Graphics::Gdi::HFONT,
 ) {
-    ui::round(hdc, 14, top, W - 14, top + 40, 12, ui::CARD);
+    ui::round(hdc, 14, top, W - 14, top + 40, 12, if hot { ui::ROW_HOVER } else { ui::CARD });
     ui::text(hdc, f_body, ui::TEXT, label, rect(28, top + 2, 220, top + 38), DT_LEFT);
     let pill_w = 84;
     let pill_x = W - 14 - 14 - pill_w;
@@ -121,6 +144,7 @@ unsafe fn paint(hwnd: HWND) {
     let f_body = ui::font(12, 400);
     let f_tiny = ui::font(10, 400);
     let f_value = ui::font(11, 600);
+    let hover = HOVER.load(Ordering::Relaxed);
 
     ui::text(hdc, f_title, ui::TEXT, "Settings", rect(18, 12, 200, 36), DT_LEFT);
     ui::text(hdc, f_tiny, ui::DIM, "Neno 1.0", rect(240, 14, W - 18, 32), DT_RIGHT);
@@ -134,6 +158,7 @@ unsafe fn paint(hwnd: HWND) {
         &format!("{:.1} L", water.goal_liters),
         0x00303033,
         ui::TEXT,
+        hover == 1,
         f_body,
         f_value,
     );
@@ -146,6 +171,7 @@ unsafe fn paint(hwnd: HWND) {
         if autostart { "ON" } else { "OFF" },
         if autostart { ui::GREEN } else { ui::FAINT },
         if autostart { 0x00000000 } else { ui::DIM },
+        hover == 2,
         f_body,
         f_value,
     );
@@ -158,6 +184,7 @@ unsafe fn paint(hwnd: HWND) {
         if dark { "Dark" } else { "Light" },
         0x00303033,
         ui::TEXT,
+        hover == 3,
         f_body,
         f_value,
     );
@@ -173,6 +200,7 @@ unsafe fn paint(hwnd: HWND) {
         if weather { "ON" } else { "OFF" },
         if weather { ui::GREEN } else { ui::FAINT },
         if weather { 0x00000000 } else { ui::DIM },
+        hover == 4,
         f_body,
         f_value,
     );
@@ -215,6 +243,31 @@ unsafe extern "system" fn settings_proc(
     match msg {
         WM_PAINT => {
             unsafe { paint(hwnd); }
+            LRESULT(0)
+        }
+        WM_MOUSEMOVE => {
+            let y = ((lparam.0 >> 16) & 0xFFFF) as u16 as i16 as i32;
+            if !HOVER_TRACKING.swap(true, Ordering::Relaxed) {
+                let mut tme = TRACKMOUSEEVENT {
+                    cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32,
+                    dwFlags: TME_LEAVE,
+                    hwndTrack: hwnd,
+                    dwHoverTime: 0,
+                };
+                let _ = unsafe { TrackMouseEvent(&mut tme) };
+            }
+            let id = hover_target(y);
+            if id != HOVER.load(Ordering::Relaxed) {
+                HOVER.store(id, Ordering::Relaxed);
+                repaint(hwnd);
+            }
+            LRESULT(0)
+        }
+        WM_MOUSELEAVE => {
+            HOVER_TRACKING.store(false, Ordering::Relaxed);
+            if HOVER.swap(0, Ordering::Relaxed) != 0 {
+                repaint(hwnd);
+            }
             LRESULT(0)
         }
         WM_LBUTTONDOWN => {

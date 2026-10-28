@@ -19,10 +19,13 @@ use windows::Win32::Graphics::Gdi::{
 
 pub const BG: u32 = 0x00161618;
 pub const CARD: u32 = 0x001F1F22;
+pub const ROW_HOVER: u32 = 0x0028282C;
+pub const HOVER: u32 = 0x002F2F33;
 pub const TEXT: u32 = 0x00FFFFFF;
 pub const DIM: u32 = 0x00938E8E;
 pub const FAINT: u32 = 0x003A3A3C;
 pub const GREEN: u32 = 0x0058D130;
+pub const GREEN_HI: u32 = 0x006DE24B;
 pub const TRACK: u32 = 0x00303030;
 pub const DONE: u32 = 0x006A6A6E;
 

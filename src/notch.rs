@@ -17,12 +17,16 @@ use windows::Win32::Graphics::Gdi::{
     HDC, HFONT, HGDIOBJ, NULL_BRUSH, NULL_PEN, PAINTSTRUCT, PS_SOLID, TRANSPARENT,
 };
 use windows::Win32::System::SystemInformation::GetLocalTime;
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    TrackMouseEvent, TME_LEAVE, TRACKMOUSEEVENT,
+};
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DispatchMessageW, GetCursorPos, GetMessageW, GetSystemMetrics,
     GetWindowRect, PostQuitMessage, RegisterClassExW, SetTimer, SetWindowPos, TranslateMessage,
     CS_DROPSHADOW, CS_HREDRAW, CS_VREDRAW, HWND_TOPMOST, MSG, SM_CXSCREEN, SWP_NOACTIVATE, SWP_SHOWWINDOW,
-    WM_DESTROY, WM_DROPFILES, WM_KEYDOWN, WM_LBUTTONDOWN, WM_MOUSEWHEEL, WM_PAINT, WM_RBUTTONDOWN,
-    WM_TIMER, WNDCLASSEXW, WS_EX_ACCEPTFILES, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+    WM_DESTROY, WM_DROPFILES, WM_KEYDOWN, WM_LBUTTONDOWN, WM_MOUSEMOVE, WM_MOUSEWHEEL,
+    WM_PAINT, WM_RBUTTONDOWN, WM_TIMER, WNDCLASSEXW, WS_EX_ACCEPTFILES, WS_EX_TOOLWINDOW,
+    WS_EX_TOPMOST, WS_POPUP,
 };
 
 const COLLAPSED_W: i32 = 164;
@@ -30,6 +34,7 @@ const COLLAPSED_H: i32 = 30;
 const EXPANDED_W: i32 = 420;
 const EXPANDED_H: i32 = 140;
 const PAGE_COUNT: usize = 5;
+const WM_MOUSELEAVE: u32 = 0x02A3;
 
 const PAGE_MEDIA: usize = 0;
 const PAGE_FOCUS: usize = 1;
@@ -47,6 +52,26 @@ static PLAY_LEN: AtomicUsize = AtomicUsize::new(0); // seconds
 static NOTCH_TEXT: Mutex<String> = Mutex::new(String::new());
 static THEME_DARK: Mutex<bool> = Mutex::new(true);
 static LAST_INSIDE: Mutex<Option<Instant>> = Mutex::new(None);
+static HOVER_ID: AtomicUsize = AtomicUsize::new(0);
+static HOVER_TRACKING: AtomicBool = AtomicBool::new(false);
+
+// Hover targets shared with the paint routines.
+const HOVER_CHEV_LEFT: usize = 1;
+const HOVER_CHEV_RIGHT: usize = 2;
+const HOVER_DOT: usize = 10; // + page index
+const HOVER_MEDIA_PREV: usize = 30;
+const HOVER_MEDIA_PLAY: usize = 31;
+const HOVER_MEDIA_NEXT: usize = 32;
+const HOVER_FOCUS_START: usize = 40;
+const HOVER_FOCUS_RESET: usize = 41;
+const HOVER_WATER_DRANK: usize = 50;
+const HOVER_WATER_SNOOZE: usize = 51;
+const HOVER_WATER_RESET: usize = 52;
+const HOVER_SHELF_ZONE: usize = 60;
+
+fn hover_is(id: usize) -> bool {
+    HOVER_ID.load(Ordering::Relaxed) == id
+}
 #[allow(static_mut_refs)]
 static mut NOTCH_HWND: Option<HWND> = None;
 
@@ -165,6 +190,7 @@ pub fn collapse() {
 
 fn layout(hwnd: HWND, expanded: bool) {
     unsafe {
+        HOVER_ID.store(0, Ordering::Relaxed);
         let (w, h) = if expanded { (EXPANDED_W, EXPANDED_H) } else { (COLLAPSED_W, COLLAPSED_H) };
         let sw = GetSystemMetrics(SM_CXSCREEN);
         let _ = SetWindowPos(
@@ -222,6 +248,8 @@ struct Palette {
     dim: u32,
     faint: u32,
     green: u32,
+    green_hi: u32,
+    hover: u32,
     art: u32,
     track: u32,
 }
@@ -234,6 +262,8 @@ fn palette() -> Palette {
             dim: 0x00938E8E,   // #8E8E93
             faint: 0x003C3A3A, // #3A3A3C
             green: 0x0058D130, // #30D158
+            green_hi: 0x006DE24B,
+            hover: 0x004A4A4E,
             art: 0x001E1C1C,   // #1C1C1E
             track: 0x00303030,
         }
@@ -244,6 +274,8 @@ fn palette() -> Palette {
             dim: 0x00736E6E,   // #6E6E73
             faint: 0x00DBD6D6, // #D6D6DB
             green: 0x0058D130,
+            green_hi: 0x006DE24B,
+            hover: 0x00CFCFD5,
             art: 0x00EDE8E8,   // #E8E8ED
             track: 0x00DCDCDC,
         }
@@ -557,12 +589,14 @@ unsafe fn paint(hwnd: HWND) {
 
     paint_dots(hdc, &p, page);
     if page > 0 {
-        circle(hdc, 22, 70, 11, p.faint);
-        chevron(hdc, 22, 70, -1, p.dim);
+        let hot = hover_is(HOVER_CHEV_LEFT);
+        circle(hdc, 22, 70, 11, if hot { p.hover } else { p.faint });
+        chevron(hdc, 22, 70, -1, if hot { p.text } else { p.dim });
     }
     if page + 1 < PAGE_COUNT {
-        circle(hdc, EXPANDED_W - 22, 70, 11, p.faint);
-        chevron(hdc, EXPANDED_W - 22, 70, 1, p.dim);
+        let hot = hover_is(HOVER_CHEV_RIGHT);
+        circle(hdc, EXPANDED_W - 22, 70, 11, if hot { p.hover } else { p.faint });
+        chevron(hdc, EXPANDED_W - 22, 70, 1, if hot { p.text } else { p.dim });
     }
 
     for f in [f_date, f_time, f_title, f_small, f_tiny, f_big, f_mid, f_btn, f_glyph] {
@@ -696,6 +730,15 @@ unsafe fn paint_media(
 
     // Controls.
     let cy = 102;
+    if hover_is(HOVER_MEDIA_PREV) {
+        circle(hdc, 168, cy, 14, p.faint);
+    }
+    if hover_is(HOVER_MEDIA_PLAY) {
+        circle(hdc, 210, cy, 14, p.faint);
+    }
+    if hover_is(HOVER_MEDIA_NEXT) {
+        circle(hdc, 252, cy, 14, p.faint);
+    }
     skip_icon(hdc, 168, cy, if media.is_empty() { p.faint } else { p.dim }, -1);
     if PLAYING.load(Ordering::Relaxed) {
         pause_bars(hdc, 210, cy, p.text);
@@ -765,8 +808,10 @@ unsafe fn paint_focus(
     );
 
     let start_label = if running { "Pause" } else { "Start" };
-    button(hdc, EXPANDED_W / 2 - 78, 98, 72, 22, p.green, 0x00000000, start_label, f_btn);
-    button(hdc, EXPANDED_W / 2 + 8, 98, 70, 22, p.faint, p.text, "Reset", f_btn);
+    let start_bg = if hover_is(HOVER_FOCUS_START) { p.green_hi } else { p.green };
+    let reset_bg = if hover_is(HOVER_FOCUS_RESET) { p.hover } else { p.faint };
+    button(hdc, EXPANDED_W / 2 - 78, 98, 72, 22, start_bg, 0x00000000, start_label, f_btn);
+    button(hdc, EXPANDED_W / 2 + 8, 98, 70, 22, reset_bg, p.text, "Reset", f_btn);
 
     let _ = WEATHER.lock().map(|w| w.len());
 }
@@ -803,9 +848,12 @@ unsafe fn paint_water(
         RECT { left: 0, top: 82, right: EXPANDED_W, bottom: 96 },
         DT_CENTER,
     );
-    button(hdc, EXPANDED_W / 2 - 112, 100, 78, 22, p.green, 0x00000000, "Drank +250", f_btn);
-    button(hdc, EXPANDED_W / 2 - 26, 100, 60, 22, p.faint, p.text, "Snooze", f_btn);
-    button(hdc, EXPANDED_W / 2 + 42, 100, 60, 22, p.faint, p.text, "Reset", f_btn);
+    let drank_bg = if hover_is(HOVER_WATER_DRANK) { p.green_hi } else { p.green };
+    let snooze_bg = if hover_is(HOVER_WATER_SNOOZE) { p.hover } else { p.faint };
+    let reset_bg = if hover_is(HOVER_WATER_RESET) { p.hover } else { p.faint };
+    button(hdc, EXPANDED_W / 2 - 112, 100, 78, 22, drank_bg, 0x00000000, "Drank +250", f_btn);
+    button(hdc, EXPANDED_W / 2 - 26, 100, 60, 22, snooze_bg, p.text, "Snooze", f_btn);
+    button(hdc, EXPANDED_W / 2 + 42, 100, 60, 22, reset_bg, p.text, "Reset", f_btn);
 }
 
 unsafe fn paint_todo(
@@ -879,9 +927,10 @@ unsafe fn paint_shelf(
     paint_header(hdc, p, f_date, f_time, clock, date);
 
     // Drop zone: a soft card the user can throw files onto.
+    let hot = hover_is(HOVER_SHELF_ZONE);
     let (l, t, r, b) = (44, 40, EXPANDED_W - 44, 106);
     let brush = CreateSolidBrush(COLORREF(p.art));
-    let pen = CreatePen(PS_SOLID, 1, COLORREF(p.faint));
+    let pen = CreatePen(PS_SOLID, if hot { 2 } else { 1 }, COLORREF(if hot { p.dim } else { p.faint }));
     let old_brush = SelectObject(hdc, HGDIOBJ(brush.0));
     let old_pen = SelectObject(hdc, HGDIOBJ(pen.0));
     let _ = RoundRect(hdc, l, t, r, b, 28, 28);
@@ -893,11 +942,12 @@ unsafe fn paint_shelf(
     // Folder glyph.
     let ix = l + 26;
     let iy = 62;
-    let icon = CreateSolidBrush(COLORREF(p.dim));
+    let icon_color = if hot { p.text } else { p.dim };
+    let icon = CreateSolidBrush(COLORREF(icon_color));
     let ob = SelectObject(hdc, HGDIOBJ(icon.0));
     let op = SelectObject(hdc, GetStockObject(NULL_PEN));
     let _ = RoundRect(hdc, ix, iy - 8, ix + 32, iy + 10, 8, 8);
-    fill(hdc, ix + 2, iy - 12, ix + 13, iy - 6, p.dim);
+    fill(hdc, ix + 2, iy - 12, ix + 13, iy - 6, icon_color);
     SelectObject(hdc, op);
     SelectObject(hdc, ob);
     let _ = DeleteObject(HGDIOBJ(icon.0));
@@ -962,12 +1012,87 @@ unsafe fn paint_dots(hdc: HDC, p: &Palette, page: usize) {
         if i == page {
             fill(hdc, cx - 7, 129, cx + 7, 133, p.text);
         } else {
+            if hover_is(HOVER_DOT + i) {
+                circle(hdc, *cx, 131, 5, p.faint);
+            }
             fill(hdc, cx - 1, 130, cx + 2, 133, 0x00808085);
         }
     }
 }
 
 // ------------------------------------------------------------------ input
+
+/// Which control is under the pointer (used for hover feedback).
+fn hotspot(x: i32, y: i32) -> usize {
+    if !EXPANDED.load(Ordering::Relaxed) {
+        return 0;
+    }
+    let page = PAGE.load(Ordering::Relaxed);
+    if y >= 122 {
+        for (i, cx) in dot_centers(page).iter().enumerate() {
+            if (x - cx).abs() <= 7 {
+                return HOVER_DOT + i;
+            }
+        }
+        return 0;
+    }
+    if (x < 38 || x > EXPANDED_W - 38) && (46..=94).contains(&y) {
+        if x < 38 && page > 0 {
+            return HOVER_CHEV_LEFT;
+        }
+        if x > EXPANDED_W - 38 && page + 1 < PAGE_COUNT {
+            return HOVER_CHEV_RIGHT;
+        }
+        return 0;
+    }
+    match page {
+        PAGE_MEDIA => {
+            if (80..=112).contains(&y) {
+                if (144..=184).contains(&x) {
+                    return HOVER_MEDIA_PREV;
+                }
+                if (186..=234).contains(&x) {
+                    return HOVER_MEDIA_PLAY;
+                }
+                if (236..=276).contains(&x) {
+                    return HOVER_MEDIA_NEXT;
+                }
+            }
+        }
+        PAGE_FOCUS => {
+            if (98..=120).contains(&y) {
+                let cx = EXPANDED_W / 2;
+                if ((cx - 78)..=(cx - 6)).contains(&x) {
+                    return HOVER_FOCUS_START;
+                }
+                if ((cx + 8)..=(cx + 78)).contains(&x) {
+                    return HOVER_FOCUS_RESET;
+                }
+            }
+        }
+        PAGE_WATER => {
+            if (100..=122).contains(&y) {
+                let cx = EXPANDED_W / 2;
+                if ((cx - 112)..=(cx - 34)).contains(&x) {
+                    return HOVER_WATER_DRANK;
+                }
+                if ((cx - 26)..=(cx + 34)).contains(&x) {
+                    return HOVER_WATER_SNOOZE;
+                }
+                if ((cx + 42)..=(cx + 102)).contains(&x) {
+                    return HOVER_WATER_RESET;
+                }
+            }
+        }
+        PAGE_SHELF => {
+            if (44..=(EXPANDED_W - 44)).contains(&x) && (40..=106).contains(&y) {
+                return HOVER_SHELF_ZONE;
+            }
+        }
+        _ => {}
+    }
+    0
+}
 
 fn click(hwnd: HWND, x: i32, y: i32) {
     if !EXPANDED.load(Ordering::Relaxed) {
@@ -981,6 +1106,7 @@ fn click(hwnd: HWND, x: i32, y: i32) {
         for (i, cx) in dot_centers(page).iter().enumerate() {
             if (x - cx).abs() <= 7 {
                 PAGE.store(i, Ordering::Relaxed);
+                HOVER_ID.store(0, Ordering::Relaxed);
                 unsafe { let _ = InvalidateRect(hwnd, None, true); }
                 return;
             }
@@ -998,6 +1124,7 @@ fn click(hwnd: HWND, x: i32, y: i32) {
         }
         if next != page {
             PAGE.store(next, Ordering::Relaxed);
+            HOVER_ID.store(0, Ordering::Relaxed);
             unsafe { let _ = InvalidateRect(hwnd, None, true); }
         }
         return;
@@ -1197,6 +1324,32 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
             unsafe { paint(hwnd); }
             LRESULT(0)
         }
+        WM_MOUSEMOVE => {
+            let x = (lparam.0 & 0xffff) as u16 as i16 as i32;
+            let y = ((lparam.0 >> 16) & 0xffff) as u16 as i16 as i32;
+            if !HOVER_TRACKING.swap(true, Ordering::Relaxed) {
+                let mut tme = TRACKMOUSEEVENT {
+                    cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32,
+                    dwFlags: TME_LEAVE,
+                    hwndTrack: hwnd,
+                    dwHoverTime: 0,
+                };
+                let _ = unsafe { TrackMouseEvent(&mut tme) };
+            }
+            let id = hotspot(x, y);
+            if id != HOVER_ID.load(Ordering::Relaxed) {
+                HOVER_ID.store(id, Ordering::Relaxed);
+                unsafe { let _ = InvalidateRect(hwnd, None, false); }
+            }
+            LRESULT(0)
+        }
+        WM_MOUSELEAVE => {
+            HOVER_TRACKING.store(false, Ordering::Relaxed);
+            if HOVER_ID.swap(0, Ordering::Relaxed) != 0 {
+                unsafe { let _ = InvalidateRect(hwnd, None, false); }
+            }
+            LRESULT(0)
+        }
         WM_LBUTTONDOWN => {
             let x = (lparam.0 & 0xffff) as u16 as i16 as i32;
             let y = ((lparam.0 >> 16) & 0xffff) as u16 as i16 as i32;
@@ -1221,6 +1374,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                     page - 1
                 };
                 PAGE.store(next, Ordering::Relaxed);
+                HOVER_ID.store(0, Ordering::Relaxed);
                 unsafe { let _ = InvalidateRect(hwnd, None, true); }
             }
             LRESULT(0)
@@ -1228,6 +1382,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
         WM_DROPFILES => {
             crate::shelf::handle_drop_files(wparam.0 as isize);
             PAGE.store(PAGE_SHELF, Ordering::Relaxed);
+            HOVER_ID.store(0, Ordering::Relaxed);
             if !EXPANDED.load(Ordering::Relaxed) {
                 layout(hwnd, true);
             } else {
