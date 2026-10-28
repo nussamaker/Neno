@@ -4,6 +4,10 @@ A Windows "notch" overlay app — music, lyrics, focus timer, water reminder, to
 
 Reconstructed from reverse engineering of the original "Nusa" app, rebranded to **Neno**.
 
+## Download
+
+The latest installer is on the [Releases page](https://github.com/nussamaker/Neno/releases/latest). Run `NenoSetup.exe`; it installs to `%LOCALAPPDATA%\Programs\Neno` and runs without a console window.
+
 ## Features
 
 - **Notch overlay** — Nusa-style compact clock pill at the top of the screen that expands into a rounded five-page card (media, focus, water, to-do, shelf), custom GDI drawing, always-on-top
