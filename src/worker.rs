@@ -60,6 +60,10 @@ fn run() {
 
 /// Update title/lyrics only when the track changes; clear them when playback ends.
 fn poll_media(last_key: &mut String) {
+    match media::MediaSession::playback() {
+        Some(p) => notch::set_playback(p.position, p.duration, p.playing),
+        None => notch::set_playback(0, 0, false),
+    }
     match media::MediaSession::current() {
         Some(m) => {
             let key = format!("{}\u{1}{}", m.title, m.artist);

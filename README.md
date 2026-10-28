@@ -6,14 +6,15 @@ Reconstructed from reverse engineering of the original "Nusa" app, rebranded to 
 
 ## Features
 
-- **Notch overlay** — always-on-top, Direct2D + DirectWrite rendering, live text (focus countdown, media title, Bluetooth count, notification count, lyrics snippet)
-- **Media** — now-playing via WinRT, keyboard controls (Space = play/pause, → = next, ← = prev), LRCLIB lyrics fetch + local cache
+- **Notch overlay** — Nusa-style compact clock pill at the top of the screen that expands into a rounded five-page card (media, focus, water, to-do, shelf), custom GDI drawing, always-on-top
+- **Media** — now-playing via WinRT, album art placeholder, progress bar, play/pause and skip controls, LRCLIB lyrics fetch + local cache
+- **Navigation** — click the pill to expand, click the page dots or side chevrons, scroll the mouse wheel, right-click or move away to collapse
 - **Focus timer** — Pomodoro (25 min focus / 5 min short break / 15 min long break)
 - **Water reminder** — bottle goals (1.5 / 2.0 / 2.5 / 3.0 L), refill/snooze, progress
 - **To-do list** — add (type + Enter), toggle (click), persisted to `%APPDATA%\Neno\todo.txt`
 - **Shelf** — file copy + `.url` Internet Shortcuts, drag-and-drop (WM_DROPFILES)
 - **Autostart** — toggle `HKCU\...\Run\Neno`
-- **System tray icon** — click to toggle the to-do panel
+- **System tray icon** — left-click toggles the to-do panel; right-click opens Toggle Panel / Toggle Notch / Settings / Quit
 - **Bluetooth** — paired device listing
 - **Notifications** — count via UserNotificationListener
 - **Network** — connectivity check, shared HTTP client with timeouts

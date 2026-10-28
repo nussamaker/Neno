@@ -74,6 +74,16 @@ pub fn toggle_panel() {
     }
 }
 
+pub fn show_panel() {
+    if let Some(hwnd) = panel_hwnd() {
+        PANEL_VISIBLE.store(true, Ordering::SeqCst);
+        unsafe {
+            use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_SHOW};
+            let _ = ShowWindow(hwnd, SW_SHOW);
+        }
+    }
+}
+
 unsafe extern "system" fn panel_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     match msg {
         WM_PAINT => {

@@ -36,8 +36,13 @@ impl WaterReminder {
         if let Ok(txt) = fs::read_to_string(&path) {
             for line in txt.lines() {
                 if let Some(v) = line.strip_prefix("goal=") {
-                    if let Ok(f) = v.parse::<f32>() { w.goal_liters = f; }
+                    // Older Nusa files store millilitres (2000), Neno stores litres (2.0).
+                    if let Ok(f) = v.parse::<f32>() {
+                        w.goal_liters = if f > 100.0 { f / 1000.0 } else { f };
+                    }
                 } else if let Some(v) = line.strip_prefix("consumed=") {
+                    if let Ok(n) = v.parse::<u32>() { w.consumed_ml = n; }
+                } else if let Some(v) = line.strip_prefix("taken=") {
                     if let Ok(n) = v.parse::<u32>() { w.consumed_ml = n; }
                 } else if let Some(v) = line.strip_prefix("snoozed=") {
                     w.snoozed = v == "1";
@@ -49,7 +54,12 @@ impl WaterReminder {
         // Settings override
         let settings = crate::settings::Settings::load();
         if let Some(v) = settings.get("water_goal") {
-            if let Ok(f) = v.parse::<f32>() { w.goal_liters = f; }
+            if let Ok(f) = v.parse::<f32>() {
+                w.goal_liters = if f > 100.0 { f / 1000.0 } else { f };
+            }
+        }
+        if !(0.5..=10.0).contains(&w.goal_liters) {
+            w.goal_liters = 2.0;
         }
         // Daily reset: if date changed, reset consumed.
         let today = today_string();
