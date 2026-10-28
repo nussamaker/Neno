@@ -3,12 +3,16 @@ use windows::Win32::UI::Shell::{
     Shell_NotifyIconW, NOTIFYICONDATAW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, PostQuitMessage, RegisterClassExW,
-    TranslateMessage, CS_HREDRAW, CS_VREDRAW, MSG, WM_DESTROY, WM_USER, WNDCLASSEXW, WS_OVERLAPPED,
+    CreatePopupMenu, AppendMenuW, TrackPopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu,
+    DispatchMessageW, GetMessageW, PostQuitMessage, RegisterClassExW, TranslateMessage,
+    CS_HREDRAW, CS_VREDRAW, MSG, TPM_LEFTALIGN, TPM_BOTTOMALIGN, WM_COMMAND, WM_DESTROY, WM_RBUTTONUP,
+    WM_USER, WNDCLASSEXW, WS_OVERLAPPED, MF_STRING,
 };
 use windows::core::PCWSTR;
 
 const TRAY_MSG: u32 = WM_USER + 1;
+const CMD_TOGGLE_PANEL: usize = 1001;
+const CMD_QUIT: usize = 1002;
 
 pub struct TrayIcon {
     pub hwnd: HWND,
@@ -36,7 +40,6 @@ impl TrayIcon {
             };
             RegisterClassExW(&wc as *const _);
 
-            // Hidden message window
             let hwnd = CreateWindowExW(
                 Default::default(),
                 PCWSTR(class_name.as_ptr()),
@@ -46,8 +49,8 @@ impl TrayIcon {
                 None, None, wc.hInstance, None,
             )?;
 
-            // Add tray icon
-            use windows::Win32::UI::WindowsAndMessaging::{LoadIconW, IDI_APPLICATION};
+            use windows::Win32::UI::WindowsAndMessaging::LoadIconW;
+            use windows::Win32::UI::WindowsAndMessaging::IDI_APPLICATION;
             let hicon = LoadIconW(None, IDI_APPLICATION).unwrap_or_default();
             let mut nid = NOTIFYICONDATAW {
                 cbSize: std::mem::size_of::<NOTIFYICONDATAW>() as u32,
@@ -75,7 +78,7 @@ impl TrayIcon {
                 uID: 1,
                 ..Default::default()
             };
-            Shell_NotifyIconW(NIM_DELETE, &nid);
+            let _ = Shell_NotifyIconW(NIM_DELETE, &nid);
         }
     }
 }
@@ -95,8 +98,30 @@ unsafe extern "system" fn tray_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam
                 crate::panel::toggle_panel();
             }
             if event == 0x0205 {
-                // WM_RBUTTONUP -> exit
-                std::process::exit(0);
+                // WM_RBUTTONUP -> show context menu
+                unsafe {
+                    let menu = CreatePopupMenu().unwrap_or_default();
+                    let toggle_text: Vec<u16> = "Toggle Panel\0".encode_utf16().collect();
+                    let quit_text: Vec<u16> = "Quit\0".encode_utf16().collect();
+                    let _ = AppendMenuW(menu, MF_STRING, CMD_TOGGLE_PANEL, PCWSTR(toggle_text.as_ptr()));
+                    let _ = AppendMenuW(menu, MF_STRING, CMD_QUIT, PCWSTR(quit_text.as_ptr()));
+                    // Get cursor position
+                    use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
+                    use windows::Win32::Foundation::POINT;
+                    let mut pt = POINT::default();
+                    let _ = GetCursorPos(&mut pt);
+                    let _ = TrackPopupMenu(menu, TPM_LEFTALIGN | TPM_BOTTOMALIGN, pt.x, pt.y, 0, hwnd, None);
+                    let _ = DestroyMenu(menu);
+                }
+            }
+            LRESULT(0)
+        }
+        WM_COMMAND => {
+            let cmd = (wparam.0 & 0xFFFF) as usize;
+            match cmd {
+                CMD_TOGGLE_PANEL => crate::panel::toggle_panel(),
+                CMD_QUIT => std::process::exit(0),
+                _ => {}
             }
             LRESULT(0)
         }
