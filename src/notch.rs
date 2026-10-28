@@ -2,6 +2,29 @@ use std::sync::Mutex;
 
 use std::sync::OnceLock;
 static NOTCH_TEXT: Mutex<String> = Mutex::new(String::new());
+#[allow(static_mut_refs)]
+static mut NOTCH_HWND: Option<HWND> = None;
+
+pub fn set_notch_hwnd(hwnd: HWND) {
+    unsafe { NOTCH_HWND = Some(hwnd); }
+}
+
+pub fn get_notch_hwnd() -> Option<HWND> {
+    unsafe { NOTCH_HWND }
+}
+
+pub fn toggle_notch() {
+    if let Some(hwnd) = get_notch_hwnd() {
+        unsafe {
+            use windows::Win32::UI::WindowsAndMessaging::{IsWindowVisible, ShowWindow, SW_HIDE, SW_SHOW};
+            if IsWindowVisible(hwnd).as_bool() {
+                ShowWindow(hwnd, SW_HIDE);
+            } else {
+                ShowWindow(hwnd, SW_SHOW);
+            }
+        }
+    }
+}
 pub static FOCUS: OnceLock<Mutex<crate::focus::FocusTimer>> = OnceLock::new();
 static MEDIA_TITLE: Mutex<String> = Mutex::new(String::new());
 static LYRICS: Mutex<String> = Mutex::new(String::new());
@@ -134,6 +157,7 @@ impl Notch {
                 // Water reminder every 30 minutes.
                 SetTimer(hwnd, 2, 1800000, None);
             }
+            set_notch_hwnd(hwnd);
             Ok(Self { hwnd })
         }
     }

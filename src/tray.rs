@@ -12,8 +12,9 @@ use windows::core::PCWSTR;
 
 const TRAY_MSG: u32 = WM_USER + 1;
 const CMD_TOGGLE_PANEL: usize = 1001;
-const CMD_SETTINGS: usize = 1002;
-const CMD_QUIT: usize = 1003;
+const CMD_TOGGLE_NOTCH: usize = 1002;
+const CMD_SETTINGS: usize = 1003;
+const CMD_QUIT: usize = 1004;
 
 pub struct TrayIcon {
     pub hwnd: HWND,
@@ -98,14 +99,20 @@ unsafe extern "system" fn tray_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam
                 // WM_LBUTTONUP -> toggle panel
                 crate::panel::toggle_panel();
             }
+            if event == 0x0203 {
+                // WM_LBUTTONDBLCLK -> toggle notch
+                crate::notch::toggle_notch();
+            }
             if event == 0x0205 {
                 // WM_RBUTTONUP -> show context menu
                 unsafe {
                     let menu = CreatePopupMenu().unwrap_or_default();
                     let toggle_text: Vec<u16> = "Toggle Panel\0".encode_utf16().collect();
+                    let notch_text: Vec<u16> = "Toggle Notch\0".encode_utf16().collect();
                     let settings_text: Vec<u16> = "Settings\0".encode_utf16().collect();
                     let quit_text: Vec<u16> = "Quit\0".encode_utf16().collect();
                     let _ = AppendMenuW(menu, MF_STRING, CMD_TOGGLE_PANEL, PCWSTR(toggle_text.as_ptr()));
+                    let _ = AppendMenuW(menu, MF_STRING, CMD_TOGGLE_NOTCH, PCWSTR(notch_text.as_ptr()));
                     let _ = AppendMenuW(menu, MF_STRING, CMD_SETTINGS, PCWSTR(settings_text.as_ptr()));
                     let _ = AppendMenuW(menu, MF_STRING, CMD_QUIT, PCWSTR(quit_text.as_ptr()));
                     // Get cursor position
@@ -123,6 +130,7 @@ unsafe extern "system" fn tray_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam
             let cmd = (wparam.0 & 0xFFFF) as usize;
             match cmd {
                 CMD_TOGGLE_PANEL => crate::panel::toggle_panel(),
+                CMD_TOGGLE_NOTCH => crate::notch::toggle_notch(),
                 CMD_SETTINGS => crate::settings_window::toggle_settings(),
                 CMD_QUIT => std::process::exit(0),
                 _ => {}
