@@ -1,12 +1,12 @@
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::UI::Shell::{
     Shell_NotifyIconW, NOTIFYICONDATAW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CreatePopupMenu, AppendMenuW, TrackPopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu,
     DispatchMessageW, GetMessageW, PostQuitMessage, RegisterClassExW, TranslateMessage,
-    CS_HREDRAW, CS_VREDRAW, MSG, TPM_LEFTALIGN, TPM_BOTTOMALIGN, WM_COMMAND, WM_DESTROY, WM_RBUTTONUP,
-    WM_USER, WNDCLASSEXW, WS_OVERLAPPED, MF_STRING,
+    CS_HREDRAW, CS_VREDRAW, HICON, MSG, TPM_LEFTALIGN, TPM_BOTTOMALIGN, WM_COMMAND, WM_DESTROY,
+    WM_RBUTTONUP, WM_USER, WNDCLASSEXW, WS_OVERLAPPED, MF_STRING,
 };
 use windows::core::PCWSTR;
 
@@ -121,6 +121,29 @@ fn app_icon() -> windows::Win32::UI::WindowsAndMessaging::HICON {
     }
 }
 
+/// The character icon embedded in the executable by build.rs.
+fn resource_icon() -> Option<HICON> {
+    use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+    use windows::Win32::UI::WindowsAndMessaging::{LoadImageW, IMAGE_ICON, LR_DEFAULTCOLOR};
+    unsafe {
+        let module = GetModuleHandleW(None).ok()?;
+        let handle = LoadImageW(
+            HINSTANCE(module.0),
+            PCWSTR(1 as *const u16),
+            IMAGE_ICON,
+            32,
+            32,
+            LR_DEFAULTCOLOR,
+        )
+        .ok()?;
+        if handle.0.is_null() {
+            None
+        } else {
+            Some(HICON(handle.0))
+        }
+    }
+}
+
 /// Switch the process to dark Win32 menus (undocumented uxtheme ordinals 135/136,
 /// used by Win32 apps for years). Falls back silently to the system look.
 fn enable_dark_menus() {
@@ -186,12 +209,13 @@ impl TrayIcon {
 
             use windows::Win32::UI::WindowsAndMessaging::LoadIconW;
             use windows::Win32::UI::WindowsAndMessaging::IDI_APPLICATION;
-            let painted = app_icon();
-            let hicon = if painted.is_invalid() {
-                LoadIconW(None, IDI_APPLICATION).unwrap_or_default()
-            } else {
-                painted
-            };
+            // Prefer the embedded cat character; the painted mark is only a fallback.
+            let hicon = resource_icon()
+                .or_else(|| {
+                    let painted = app_icon();
+                    (!painted.is_invalid()).then_some(painted)
+                })
+                .unwrap_or_else(|| LoadIconW(None, IDI_APPLICATION).unwrap_or_default());
             let mut nid = NOTIFYICONDATAW {
                 cbSize: std::mem::size_of::<NOTIFYICONDATAW>() as u32,
                 hWnd: hwnd,

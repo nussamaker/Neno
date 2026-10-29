@@ -12,6 +12,7 @@ The latest installer is on the [Releases page](https://github.com/nussamaker/Nen
 
 - **Notch overlay** — Nusa-style compact clock pill at the top of the screen that expands into a rounded five-page card (media, focus, water, to-do, shelf), custom GDI drawing, always-on-top
 - **Themes** — Dark (default), Light, and Aurora, an animated teal/cyan/violet glass field with drifting ribbons; cycle it from Settings and it is remembered across restarts
+- **Mascot** — the original Nusa character lives beside the clock in the collapsed pill: small capsule eyes and a pixel-art mitten that rests, waves on launch and when you return, and dozes off (closed slits + “Z”) after 9 seconds without input
 - **Media** — now-playing via WinRT, album art placeholder, progress bar, play/pause and skip controls, LRCLIB lyrics fetch + local cache
 - **Navigation** — click the pill to expand, click the page dots or side chevrons, scroll the mouse wheel, right-click or move away to collapse
 - **Focus timer** — Pomodoro (25 min focus / 5 min short break / 15 min long break)
@@ -19,7 +20,7 @@ The latest installer is on the [Releases page](https://github.com/nussamaker/Nen
 - **To-do list** — dark task panel with checkboxes: add (type + Enter), toggle (click), remove (right-click), scroll with the wheel, persisted to `%APPDATA%\Neno\todo.txt`
 - **Shelf** — styled drop zone in the notch that lists the three newest files (newest first); file copy + `.url` Internet Shortcuts, drag-and-drop (WM_DROPFILES)
 - **Autostart** — toggle `HKCU\...\Run\Neno`
-- **System tray icon** — branded Neno mark; left-click toggles the to-do panel; right-click opens a dark menu with Toggle Panel / Toggle Notch / Settings / Quit
+- **System tray icon** — the cat-character icon (small eyes on an aurora badge); left-click toggles the to-do panel; right-click opens a dark menu with Toggle Panel / Toggle Notch / Settings / Quit
 - **Bluetooth** — paired device listing
 - **Notifications** — count via UserNotificationListener
 - **Network** — connectivity check, shared HTTP client with timeouts
@@ -57,6 +58,9 @@ A small notch window appears at the top-center of your screen. Click it to expan
 ```
 neno/
 ├── Cargo.toml
+├── build.rs             # embeds assets/neno.ico as the executable icon
+├── assets/
+│   └── neno.ico         # original cat character, 16-256 px
 ├── src/
 │   ├── main.rs          # entry point, wires all modules
 │   ├── notch.rs         # Win32 window + custom GDI rendering + timer

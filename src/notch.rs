@@ -4,7 +4,7 @@
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Mutex, OnceLock};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM};
@@ -17,9 +17,9 @@ use windows::Win32::Graphics::Gdi::{
     DT_LEFT, DT_RIGHT, DT_SINGLELINE, DT_VCENTER, FF_DONTCARE, FW_BOLD, FW_NORMAL, FW_SEMIBOLD,
     HDC, HFONT, HGDIOBJ, NULL_BRUSH, NULL_PEN, PAINTSTRUCT, PS_SOLID, TRANSPARENT,
 };
-use windows::Win32::System::SystemInformation::GetLocalTime;
+use windows::Win32::System::SystemInformation::{GetLocalTime, GetTickCount};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    TrackMouseEvent, TME_LEAVE, TRACKMOUSEEVENT,
+    GetLastInputInfo, TrackMouseEvent, LASTINPUTINFO, TME_LEAVE, TRACKMOUSEEVENT,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DispatchMessageW, GetCursorPos, GetMessageW, GetSystemMetrics,
@@ -61,6 +61,16 @@ static THEME: Mutex<Theme> = Mutex::new(Theme::Dark);
 static LAST_INSIDE: Mutex<Option<Instant>> = Mutex::new(None);
 static HOVER_ID: AtomicUsize = AtomicUsize::new(0);
 static HOVER_TRACKING: AtomicBool = AtomicBool::new(false);
+
+/// The little mascot lives beside the clock in the closed notch. It dozes
+/// after a quiet spell and waves when the user comes back.
+#[derive(Clone, Copy)]
+struct MascotWave {
+    start: Instant,
+    until: Instant,
+}
+static MASCOT_WAVE: Mutex<Option<MascotWave>> = Mutex::new(None);
+static MASCOT_DOZING: AtomicBool = AtomicBool::new(false);
 
 // Hover targets shared with the paint routines.
 const HOVER_CHEV_LEFT: usize = 1;
@@ -550,6 +560,126 @@ unsafe fn status_icon(hdc: HDC, cx: i32, cy: i32, color: u32, sparkle: u32) {
     filled_poly(hdc, &pts, sparkle);
 }
 
+// ------------------------------------------------------------------ mascot
+
+fn system_idle_ms() -> u32 {
+    unsafe {
+        let mut info = LASTINPUTINFO {
+            cbSize: std::mem::size_of::<LASTINPUTINFO>() as u32,
+            dwTime: 0,
+        };
+        if GetLastInputInfo(&mut info).as_bool() {
+            GetTickCount().wrapping_sub(info.dwTime)
+        } else {
+            0
+        }
+    }
+}
+
+fn current_wave() -> Option<MascotWave> {
+    MASCOT_WAVE
+        .lock()
+        .ok()
+        .and_then(|w| *w)
+        .filter(|w| Instant::now() < w.until)
+}
+
+fn start_wave(hwnd: HWND, ms: u64) {
+    let now = Instant::now();
+    if let Ok(mut w) = MASCOT_WAVE.lock() {
+        *w = Some(MascotWave {
+            start: now,
+            until: now + Duration::from_millis(ms),
+        });
+    }
+    MASCOT_DOZING.store(false, Ordering::Relaxed);
+    unsafe {
+        SetTimer(hwnd, 4, 55, None);
+        let _ = InvalidateRect(hwnd, None, false);
+    }
+}
+
+/// A small vertical capsule, used for the mascot's open eyes.
+unsafe fn vcapsule(hdc: HDC, cx: i32, cy: i32, w: i32, h: i32, color: u32) {
+    let brush = CreateSolidBrush(COLORREF(color));
+    let old_brush = SelectObject(hdc, HGDIOBJ(brush.0));
+    let old_pen = SelectObject(hdc, GetStockObject(NULL_PEN));
+    let _ = RoundRect(hdc, cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2, w, w);
+    SelectObject(hdc, old_pen);
+    SelectObject(hdc, old_brush);
+    let _ = DeleteObject(HGDIOBJ(brush.0));
+}
+
+// A 10px mitten: three fingers, a thumb on the left, and a short wrist.
+// Drawn as pixels so the silhouette stays readable at notch scale.
+const MASCOT_HAND: [&str; 12] = [
+    "..##.##.##",
+    "..##.##.##",
+    "..##.##.##",
+    ".#########",
+    "##########",
+    "###.######",
+    "###.######",
+    ".#########",
+    "..########",
+    "...######.",
+    "...######.",
+    "....####..",
+];
+
+/// The phase shifts the hand a pixel or two so it reads as a wave.
+unsafe fn mascot_paw(hdc: HDC, x: i32, y: i32, color: u32, phase: usize) {
+    let dx = [0, -1, 0, 1][phase & 3];
+    let dy = [0, -1, -2, -1][phase & 3];
+    let x = x + dx;
+    let y = y + dy;
+    for (row, line) in MASCOT_HAND.iter().enumerate() {
+        for (col, ch) in line.bytes().enumerate() {
+            if ch == b'#' {
+                let px = x + col as i32;
+                let py = y + row as i32;
+                fill(hdc, px, py, px + 1, py + 1, color);
+            }
+        }
+    }
+}
+
+unsafe fn mascot_happy_eye(hdc: HDC, cx: i32, cy: i32, color: u32) {
+    line(hdc, cx - 4, cy + 2, cx - 1, cy - 1, color, 2);
+    line(hdc, cx - 1, cy - 1, cx + 1, cy - 2, color, 2);
+    line(hdc, cx + 1, cy - 2, cx + 4, cy + 2, color, 2);
+}
+
+#[derive(Clone, Copy)]
+enum MascotMood {
+    Open,
+    Dozing,
+    Waving,
+}
+
+unsafe fn draw_mascot(hdc: HDC, color: u32, dim: u32, mood: MascotMood, phase: usize) {
+    match mood {
+        MascotMood::Open => {
+            vcapsule(hdc, 23, 14, 4, 10, color);
+            vcapsule(hdc, 33, 14, 4, 10, color);
+            mascot_paw(hdc, 41, 11, color, 0);
+        }
+        MascotMood::Dozing => {
+            fill(hdc, 20, 14, 26, 16, color);
+            fill(hdc, 30, 14, 36, 16, color);
+            // A little drifting Z above the right eye.
+            line(hdc, 43, 7, 48, 7, dim, 1);
+            line(hdc, 48, 7, 43, 12, dim, 1);
+            line(hdc, 43, 12, 48, 12, dim, 1);
+        }
+        MascotMood::Waving => {
+            mascot_happy_eye(hdc, 23, 14, color);
+            mascot_happy_eye(hdc, 33, 14, color);
+            mascot_paw(hdc, 42, 8, color, phase);
+        }
+    }
+}
+
 unsafe fn play_triangle(hdc: HDC, cx: i32, cy: i32, color: u32) {
     let pts = [
         POINT { x: cx - 5, y: cy - 7 },
@@ -742,7 +872,18 @@ unsafe fn paint(hwnd: HWND) {
         }
         let (clock, _) = now_parts();
         let f_clock = make_font(17, FW_SEMIBOLD.0);
-        status_icon(hdc, 27, 15, if WATER_ALERT.load(Ordering::Relaxed) { 0x0050A8FF } else { p.green }, p.text);
+        let wave = current_wave();
+        let mood = if wave.is_some() {
+            MascotMood::Waving
+        } else if MASCOT_DOZING.load(Ordering::Relaxed) {
+            MascotMood::Dozing
+        } else {
+            MascotMood::Open
+        };
+        let phase = wave
+            .map(|w| ((w.start.elapsed().as_millis() / 160) % 4) as usize)
+            .unwrap_or(0);
+        draw_mascot(hdc, p.text, p.dim, mood, phase);
         draw_text(
             hdc,
             f_clock,
@@ -1568,6 +1709,8 @@ impl Notch {
             if theme() == Theme::Aurora {
                 SetTimer(hwnd, 3, 66, None);
             }
+            // Say hello as soon as the notch appears.
+            start_wave(hwnd, 3000);
             apply_region(hwnd, COLLAPSED_W, COLLAPSED_H, COLLAPSED_BODY_W, COLLAPSED_SHOULDER, COLLAPSED_RADIUS);
             Ok(Self { hwnd })
         }
@@ -1598,6 +1741,18 @@ impl Notch {
 unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     match msg {
         WM_TIMER => {
+            if wparam.0 == 4 {
+                if current_wave().is_some() {
+                    unsafe { let _ = InvalidateRect(hwnd, None, false); }
+                } else {
+                    unsafe { let _ = KillTimer(hwnd, 4); }
+                    if let Ok(mut w) = MASCOT_WAVE.lock() {
+                        *w = None;
+                    }
+                    unsafe { let _ = InvalidateRect(hwnd, None, false); }
+                }
+                return LRESULT(0);
+            }
             if wparam.0 == 3 {
                 if theme() == Theme::Aurora {
                     unsafe { let _ = InvalidateRect(hwnd, None, false); }
@@ -1610,6 +1765,21 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 unsafe { let _ = InvalidateRect(hwnd, None, true); }
                 return LRESULT(0);
             }
+
+            // Mascot: doze after a quiet spell, then wave on the next input.
+            let idle = system_idle_ms();
+            if current_wave().is_none() {
+                if idle < 700 {
+                    if MASCOT_DOZING.swap(false, Ordering::Relaxed) {
+                        start_wave(hwnd, 2400);
+                    }
+                } else if idle > 9000 && !EXPANDED.load(Ordering::Relaxed) {
+                    if !MASCOT_DOZING.swap(true, Ordering::Relaxed) {
+                        unsafe { let _ = InvalidateRect(hwnd, None, false); }
+                    }
+                }
+            }
+
             if let Some(focus_mutex) = FOCUS.get() {
                 if let Ok(mut f) = focus_mutex.lock() {
                     if f.tick() {

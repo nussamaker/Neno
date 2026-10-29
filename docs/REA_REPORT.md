@@ -337,10 +337,11 @@ Self-description found in `.rdata`:
 A byte-preserving rebrand to **Neno** was produced from copies of the original
 artifacts (originals left untouched):
 
-- `E:\NusaSetup\renamed\NenoSetup.exe` (SHA-256 `89F5BF55224810E6B7FEF5BA79F90335903E52BFDA9D2E9B57AED41C222F43B7`, 3,328,404 bytes) - packages the v1.0.2 reconstruction build (GUI subsystem, no console)
-- Embedded payload `neno.exe` (2,496,512 bytes, SHA-256 `E43FB95193C7A03517A3AFC75DD5AACEDE06E1770B4E2267FD354AED824F9C0C`); verified by a silent install and hash comparison against `target\release\neno.exe`
-- `E:\NusaSetup\renamed\app\neno.exe` - same 2,496,512-byte payload and SHA-256 as above
-- Previous release: v1.0.1 installer 3,319,777 bytes, SHA-256 `47F20F450A7EF8F273C6D92BAEDAEC68995362514F98D8B56EA1F1A2427080E8`; payload 2,460,672 bytes, SHA-256 `51CCDC2E7382F231B7AA48AB7A80BAA92A93FD3FAC7A47E2E425C0D21CBF75F4` (retained on the Releases page)
+- `E:\NusaSetup\renamed\NenoSetup.exe` (SHA-256 `10A80DBB5E483130974379FF16BBEC0FD713B6E916544C454EAA84156A7300DF`, 3,442,366 bytes) - packages the v1.0.3 reconstruction build (GUI subsystem, no console)
+- Embedded payload `neno.exe` (2,611,712 bytes, SHA-256 `397CC53D8F2B8821EFA6209D3769A39B2D3EF5A0CB35770B539F5568E3B44997`); verified by a silent install and hash comparison against `target\release\neno.exe`
+- `E:\NusaSetup\renamed\app\neno.exe` - same 2,611,712-byte payload and SHA-256 as above
+- Previous release: v1.0.2 installer 3,328,404 bytes, SHA-256 `89F5BF55224810E6B7FEF5BA79F90335903E52BFDA9D2E9B57AED41C222F43B7`; payload 2,496,512 bytes, SHA-256 `E43FB95193C7A03517A3AFC75DD5AACEDE06E1770B4E2267FD354AED824F9C0C`
+- Earlier release: v1.0.1 installer 3,319,777 bytes, SHA-256 `47F20F450A7EF8F273C6D92BAEDAEC68995362514F98D8B56EA1F1A2427080E8`; payload 2,460,672 bytes, SHA-256 `51CCDC2E7382F231B7AA48AB7A80BAA92A93FD3FAC7A47E2E425C0D21CBF75F4` (retained on the Releases page)
 
 Substitutions are same-length, so no offset shifts occur within uncompressed
 data: `Nusa`→`Neno`, `nusa`→`neno` in all casings, in both ASCII and UTF-16
@@ -382,6 +383,28 @@ A reconstruction scaffold (Cargo/Rust skeleton) is kept at
 `E:\NusaSetup\reconstruction\` (modules: notch, media, lyrics, focus, water,
 todo, shelf, bluetooth, notifications, network, autostart, state, settings),
 documenting the recovered architecture and data formats for future feature work.
+
+### v1.0.3 - Notch mascot
+
+The v1.0.3 build adds Nusa's small companion to the collapsed pill, matching the
+behaviour recorded from the official v1.1.0 reference and its site copy
+("a pair of eyes appears… they doze off after a while, and wave hello when you
+come back"):
+
+- Two 4x10 px capsule eyes sit beside the clock, with a 10x12 px pixel-art
+  mitten (three fingers, thumb, wrist) that stays visible at rest.
+- On launch the eyes become happy arcs and the mitten waves for 3 s. After 9 s
+  of no input (`GetLastInputInfo`/`GetTickCount`) the eyes close to slits and a
+  small "Z" appears; the next input wakes the character with a 2.4 s wave.
+- The wave animates at 55 ms only while active and then stops; idle redraws stay
+  on the existing 1 s timer, so the mascot adds no steady CPU cost.
+- Tray and executable icons now use the original cat character (small eyes on
+  the aurora badge), embedded from `assets/neno.ico` by `build.rs` as resource
+  ID 1; the tray loads it with `LoadImageW` and falls back to the painted mark
+  only if the resource is missing.
+- Verified live in Dark, Light and Aurora (open eyes + resting mitten, dozing
+  slits + "Z", and the wake wave), and the installed v1.0.3 binary matches the
+  release payload hash.
 
 ## 6. Evidence and reproducibility
 
