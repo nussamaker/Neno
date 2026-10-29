@@ -337,9 +337,10 @@ Self-description found in `.rdata`:
 A byte-preserving rebrand to **Neno** was produced from copies of the original
 artifacts (originals left untouched):
 
-- `E:\NusaSetup\renamed\NenoSetup.exe` (SHA-256 `47F20F450A7EF8F273C6D92BAEDAEC68995362514F98D8B56EA1F1A2427080E8`, 3,319,777 bytes) - packages the current reconstruction build (GUI subsystem, no console)
-- Embedded payload `neno.exe` (2,460,672 bytes, SHA-256 `51CCDC2E7382F231B7AA48AB7A80BAA92A93FD3FAC7A47E2E425C0D21CBF75F4`)
-- `E:\NusaSetup\renamed\app\neno.exe`
+- `E:\NusaSetup\renamed\NenoSetup.exe` (SHA-256 `89F5BF55224810E6B7FEF5BA79F90335903E52BFDA9D2E9B57AED41C222F43B7`, 3,328,404 bytes) - packages the v1.0.2 reconstruction build (GUI subsystem, no console)
+- Embedded payload `neno.exe` (2,496,512 bytes, SHA-256 `E43FB95193C7A03517A3AFC75DD5AACEDE06E1770B4E2267FD354AED824F9C0C`); verified by a silent install and hash comparison against `target\release\neno.exe`
+- `E:\NusaSetup\renamed\app\neno.exe` - same 2,496,512-byte payload and SHA-256 as above
+- Previous release: v1.0.1 installer 3,319,777 bytes, SHA-256 `47F20F450A7EF8F273C6D92BAEDAEC68995362514F98D8B56EA1F1A2427080E8`; payload 2,460,672 bytes, SHA-256 `51CCDC2E7382F231B7AA48AB7A80BAA92A93FD3FAC7A47E2E425C0D21CBF75F4` (retained on the Releases page)
 
 Substitutions are same-length, so no offset shifts occur within uncompressed
 data: `Nusa`→`Neno`, `nusa`→`neno` in all casings, in both ASCII and UTF-16
@@ -350,12 +351,32 @@ documented above as evidence. Scope applied: name + exe only — `AppId` GUID an
 publisher URL (`https://rama2555.github.io/nusa/`) intentionally unchanged;
 publisher name "Rama" and icon unchanged; no data migration.
 
-The rename rebuild (see `re-analysis\build_neno.py`) kept the embedded engine
+The rename rebuild (see `re-analysis\build_neno_v2.py`) kept the embedded engine
 block byte-identical, recomputed the LZMA1 primary/secondary blocks and the
 LZMA2 payload chunk, and recomputed `TableCRC = zlib.crc32(first 60 bytes of
 the loader table)`. Verification: `re-analysis\verify_neno.py` (primary/secondary
 inflate exactly, loader fields consistent, payload decodes bit-identically to
 `neno.exe`, PE version strings updated).
+
+### v1.0.2 - Aurora theme
+
+The v1.0.2 build adds a third selectable theme, **Aurora**, alongside the
+existing Dark and Light themes. It is a custom-drawn animated glass field, not
+OS acrylic, so it stays within the notch's layered-window/region model:
+
+- `Theme { Dark, Light, Aurora }` cycles Dark → Light → Aurora from the Theme row
+  in Settings; the choice is persisted as `theme=aurora` in
+  `%APPDATA%\Neno\settings.txt` and loaded at startup.
+- Aurora uses a cool teal → cyan → violet → magenta palette with two drifting
+  ribbons, two radial glows, a top sheen and a vignette. The collapsed pill and
+  expanded card animate at ~15 fps (66 ms timer); Settings and the to-do/water
+  panel use a fixed-phase, native-resolution field cached per window size.
+- All five notch pages, the collapsed pill, the Settings card and the
+  to-do/water panel render on the Aurora glass. Dark and Light keep the original
+  Nusa geometry and palettes.
+- Release-build measurement (12 s sample, Aurora active): ~3.0% of one core
+  (0.5% of 6 cores), 28.6 MB working set; Dark idles at 0.0% of one core,
+  26.5 MB. PE subsystem remains GUI (2), so no console is shown.
 
 A reconstruction scaffold (Cargo/Rust skeleton) is kept at
 `E:\NusaSetup\reconstruction\` (modules: notch, media, lyrics, focus, water,

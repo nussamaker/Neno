@@ -23,7 +23,7 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DispatchMessageW, GetCursorPos, GetMessageW, GetSystemMetrics,
-    GetWindowRect, PostQuitMessage, RegisterClassExW, SetTimer, SetWindowPos, TranslateMessage,
+    GetWindowRect, KillTimer, PostQuitMessage, RegisterClassExW, SetTimer, SetWindowPos, TranslateMessage,
     CS_DROPSHADOW, CS_HREDRAW, CS_VREDRAW, HWND_TOPMOST, MSG, SM_CXSCREEN, SWP_NOACTIVATE, SWP_SHOWWINDOW,
     WM_DESTROY, WM_DROPFILES, WM_KEYDOWN, WM_LBUTTONDOWN, WM_MOUSEMOVE, WM_MOUSEWHEEL,
     WM_PAINT, WM_RBUTTONDOWN, WM_TIMER, WNDCLASSEXW, WS_EX_ACCEPTFILES, WS_EX_TOOLWINDOW,
@@ -57,7 +57,7 @@ static PLAY_POS: AtomicUsize = AtomicUsize::new(0); // seconds
 static PLAY_LEN: AtomicUsize = AtomicUsize::new(0); // seconds
 
 static NOTCH_TEXT: Mutex<String> = Mutex::new(String::new());
-static THEME_DARK: Mutex<bool> = Mutex::new(true);
+static THEME: Mutex<Theme> = Mutex::new(Theme::Dark);
 static LAST_INSIDE: Mutex<Option<Instant>> = Mutex::new(None);
 static HOVER_ID: AtomicUsize = AtomicUsize::new(0);
 static HOVER_TRACKING: AtomicBool = AtomicBool::new(false);
@@ -76,6 +76,47 @@ const HOVER_WATER_SNOOZE: usize = 51;
 const HOVER_WATER_RESET: usize = 52;
 const HOVER_SHELF_ZONE: usize = 60;
 const HOVER_TODO_CARD: usize = 61;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Theme {
+    Dark,
+    Light,
+    Aurora,
+}
+
+impl Theme {
+    pub fn key(self) -> &'static str {
+        match self {
+            Theme::Dark => "dark",
+            Theme::Light => "light",
+            Theme::Aurora => "aurora",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Theme::Dark => "Dark",
+            Theme::Light => "Light",
+            Theme::Aurora => "Aurora",
+        }
+    }
+
+    pub fn from_key(s: &str) -> Self {
+        match s.trim() {
+            "light" => Theme::Light,
+            "aurora" => Theme::Aurora,
+            _ => Theme::Dark,
+        }
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            Theme::Dark => Theme::Light,
+            Theme::Light => Theme::Aurora,
+            Theme::Aurora => Theme::Dark,
+        }
+    }
+}
 
 fn hover_is(id: usize) -> bool {
     HOVER_ID.load(Ordering::Relaxed) == id
@@ -132,14 +173,25 @@ pub fn get_text() -> String {
     NOTCH_TEXT.lock().map(|t| t.clone()).unwrap_or_default()
 }
 
-pub fn set_theme(dark: bool) {
-    if let Ok(mut t) = THEME_DARK.lock() {
-        *t = dark;
+pub fn set_theme(theme: Theme) {
+    if let Ok(mut t) = THEME.lock() {
+        *t = theme;
+    }
+    crate::ui::set_aurora(theme == Theme::Aurora);
+    if let Some(hwnd) = get_notch_hwnd() {
+        unsafe {
+            if theme == Theme::Aurora {
+                SetTimer(hwnd, 3, 66, None);
+            } else {
+                let _ = KillTimer(hwnd, 3);
+            }
+            let _ = InvalidateRect(hwnd, None, true);
+        }
     }
 }
 
-pub fn is_dark_theme() -> bool {
-    THEME_DARK.lock().map(|t| *t).unwrap_or(true)
+pub fn theme() -> Theme {
+    THEME.lock().map(|t| *t).unwrap_or(Theme::Dark)
 }
 
 pub fn set_media_title(s: &str) {
@@ -309,8 +361,8 @@ struct Palette {
 }
 
 fn palette() -> Palette {
-    if is_dark_theme() {
-        Palette {
+    match theme() {
+        Theme::Dark => Palette {
             bg: 0x00000000,
             text: 0x00FFFFFF,
             dim: 0x00938E8E,   // #8E8E93
@@ -323,9 +375,8 @@ fn palette() -> Palette {
             art: 0x001E1C1C,   // #1C1C1E
             track: 0x00303030,
             media_track: 0x001B1B1B,
-        }
-    } else {
-        Palette {
+        },
+        Theme::Light => Palette {
             bg: 0x00F7F5F5,    // #F5F5F7
             text: 0x001E1C1C,  // #1C1C1E
             dim: 0x00736E6E,   // #6E6E73
@@ -338,7 +389,21 @@ fn palette() -> Palette {
             art: 0x00EDE8E8,   // #E8E8ED
             track: 0x00DCDCDC,
             media_track: 0x00CCC7C7,
-        }
+        },
+        Theme::Aurora => Palette {
+            bg: rgb(11, 17, 22),
+            text: 0x00FFFFFF,
+            dim: rgb(168, 185, 189),   // cool grey for glass
+            sub: rgb(120, 145, 150),
+            faint: rgb(55, 75, 82),
+            green: rgb(91, 232, 198),  // mint accent
+            green_hi: rgb(124, 244, 214),
+            hover: rgb(50, 69, 75),
+            chev: rgb(37, 51, 57),
+            art: rgb(18, 29, 35),      // smoked-glass card
+            track: rgb(34, 49, 55),
+            media_track: rgb(15, 24, 29),
+        },
     }
 }
 
@@ -425,6 +490,29 @@ unsafe fn filled_poly(hdc: HDC, pts: &[POINT], color: u32) {
     SelectObject(hdc, old_brush);
     let _ = DeleteObject(HGDIOBJ(pen.0));
     let _ = DeleteObject(HGDIOBJ(brush.0));
+}
+
+const fn rgb(r: u32, g: u32, b: u32) -> u32 {
+    r | (g << 8) | (b << 16)
+}
+
+/// Animated aurora base plus a glass rim and top highlight.
+unsafe fn aurora_glass(hdc: HDC, pts: &[POINT], w: i32, h: i32) {
+    crate::ui::aurora_bg(hdc, 0, 0, w, h, crate::ui::aurora_phase(), false);
+
+    // Rim: the outer half of the pen is clipped by the window region, leaving
+    // a soft one-pixel glass edge.
+    let pen = CreatePen(PS_SOLID, 1, COLORREF(rgb(52, 78, 74)));
+    let old_pen = SelectObject(hdc, HGDIOBJ(pen.0));
+    let old_brush = SelectObject(hdc, GetStockObject(NULL_BRUSH));
+    let _ = Polygon(hdc, pts);
+    SelectObject(hdc, old_brush);
+    SelectObject(hdc, old_pen);
+    let _ = DeleteObject(HGDIOBJ(pen.0));
+
+    // Sheen along the flat top edge.
+    let inset = if w > 200 { 36 } else { 26 };
+    fill(hdc, inset, 1, w - inset, 2, rgb(70, 96, 90));
 }
 
 unsafe fn circle(hdc: HDC, cx: i32, cy: i32, r: i32, color: u32) {
@@ -647,7 +735,11 @@ unsafe fn paint(hwnd: HWND) {
             COLLAPSED_SHOULDER,
             COLLAPSED_RADIUS,
         );
-        filled_poly(hdc, &pts, p.bg);
+        if theme() == Theme::Aurora {
+            aurora_glass(hdc, &pts, COLLAPSED_W, COLLAPSED_H);
+        } else {
+            filled_poly(hdc, &pts, p.bg);
+        }
         let (clock, _) = now_parts();
         let f_clock = make_font(17, FW_SEMIBOLD.0);
         status_icon(hdc, 27, 15, if WATER_ALERT.load(Ordering::Relaxed) { 0x0050A8FF } else { p.green }, p.text);
@@ -671,7 +763,11 @@ unsafe fn paint(hwnd: HWND) {
         EXPANDED_SHOULDER,
         EXPANDED_RADIUS,
     );
-    filled_poly(hdc, &pts, p.bg);
+    if theme() == Theme::Aurora {
+        aurora_glass(hdc, &pts, EXPANDED_WINDOW_W, EXPANDED_H);
+    } else {
+        filled_poly(hdc, &pts, p.bg);
+    }
     let _ = SetViewportOrgEx(hdc, EXPANDED_SHOULDER, 0, None);
     let f_date = make_font(13, FW_NORMAL.0);
     let f_time = make_font(14, FW_BOLD.0);
@@ -766,11 +862,17 @@ unsafe fn paint_media(
 
     // Album art placeholder, sized and placed like Nusa's 62px tile.
     let art = CreateSolidBrush(COLORREF(p.art));
+    let art_pen = CreatePen(
+        PS_SOLID,
+        1,
+        COLORREF(if theme() == Theme::Aurora { p.faint } else { p.art }),
+    );
     let old_brush = SelectObject(hdc, HGDIOBJ(art.0));
-    let old_pen = SelectObject(hdc, GetStockObject(NULL_PEN));
+    let old_pen = SelectObject(hdc, HGDIOBJ(art_pen.0));
     RoundRect(hdc, 44, 12, 107, 75, 14, 14);
     SelectObject(hdc, old_pen);
     SelectObject(hdc, old_brush);
+    let _ = DeleteObject(HGDIOBJ(art_pen.0));
     let _ = DeleteObject(HGDIOBJ(art.0));
 
     // Beamed music note, traced from Nusa's tile glyph.
@@ -1463,6 +1565,9 @@ impl Notch {
             SetTimer(hwnd, 1, 1000, None);
             SetTimer(hwnd, 2, 1800000, None);
             set_notch_hwnd(hwnd);
+            if theme() == Theme::Aurora {
+                SetTimer(hwnd, 3, 66, None);
+            }
             apply_region(hwnd, COLLAPSED_W, COLLAPSED_H, COLLAPSED_BODY_W, COLLAPSED_SHOULDER, COLLAPSED_RADIUS);
             Ok(Self { hwnd })
         }
@@ -1493,6 +1598,12 @@ impl Notch {
 unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     match msg {
         WM_TIMER => {
+            if wparam.0 == 3 {
+                if theme() == Theme::Aurora {
+                    unsafe { let _ = InvalidateRect(hwnd, None, false); }
+                }
+                return LRESULT(0);
+            }
             if wparam.0 == 2 {
                 WATER_ALERT.store(true, Ordering::Relaxed);
                 set_text("Time to drink");

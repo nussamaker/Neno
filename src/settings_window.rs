@@ -138,7 +138,7 @@ unsafe fn row(
 unsafe fn paint(hwnd: HWND) {
     let mut ps = PAINTSTRUCT::default();
     let hdc = BeginPaint(hwnd, &mut ps);
-    ui::fill(hdc, 0, 0, W, H, ui::BG);
+    ui::paint_bg(hdc, W, H);
 
     let f_title = ui::font(16, 600);
     let f_body = ui::font(12, 400);
@@ -147,7 +147,7 @@ unsafe fn paint(hwnd: HWND) {
     let hover = HOVER.load(Ordering::Relaxed);
 
     ui::text(hdc, f_title, ui::TEXT, "Settings", rect(18, 12, 200, 36), DT_LEFT);
-    ui::text(hdc, f_tiny, ui::DIM, "Neno 1.0", rect(240, 14, W - 18, 32), DT_RIGHT);
+    ui::text(hdc, f_tiny, ui::DIM, concat!("Neno ", env!("CARGO_PKG_VERSION")), rect(240, 14, W - 18, 32), DT_RIGHT);
     ui::text(hdc, f_tiny, ui::DIM, "GENERAL", rect(18, 46, 140, 64), DT_LEFT);
 
     let water = crate::water::WaterReminder::load();
@@ -176,12 +176,12 @@ unsafe fn paint(hwnd: HWND) {
         f_value,
     );
 
-    let dark = crate::notch::is_dark_theme();
+    let theme = crate::notch::theme();
     row(
         hdc,
         164,
         "Theme",
-        if dark { "Dark" } else { "Light" },
+        theme.label(),
         0x00303033,
         ui::TEXT,
         hover == 3,
@@ -290,10 +290,10 @@ unsafe extern "system" fn settings_proc(
                     crate::autostart::set_autostart(enabled, &exe);
                 }
             } else if (164..204).contains(&y) {
-                let dark = !crate::notch::is_dark_theme();
-                crate::notch::set_theme(dark);
+                let next = crate::notch::theme().next();
+                crate::notch::set_theme(next);
                 let mut settings = crate::settings::Settings::load();
-                settings.set("theme", if dark { "dark" } else { "light" });
+                settings.set("theme", next.key());
                 settings.save();
             } else if (212..252).contains(&y) {
                 let mut settings = crate::settings::Settings::load();

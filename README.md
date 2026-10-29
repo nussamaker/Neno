@@ -11,6 +11,7 @@ The latest installer is on the [Releases page](https://github.com/nussamaker/Nen
 ## Features
 
 - **Notch overlay** — Nusa-style compact clock pill at the top of the screen that expands into a rounded five-page card (media, focus, water, to-do, shelf), custom GDI drawing, always-on-top
+- **Themes** — Dark (default), Light, and Aurora, an animated teal/cyan/violet glass field with drifting ribbons; cycle it from Settings and it is remembered across restarts
 - **Media** — now-playing via WinRT, album art placeholder, progress bar, play/pause and skip controls, LRCLIB lyrics fetch + local cache
 - **Navigation** — click the pill to expand, click the page dots or side chevrons, scroll the mouse wheel, right-click or move away to collapse
 - **Focus timer** — Pomodoro (25 min focus / 5 min short break / 15 min long break)
@@ -89,7 +90,7 @@ Optional keys in `%APPDATA%\Neno\settings.txt` (one `key=value` per line):
 
 | Key | Default | Meaning |
 |---|---|---|
-| `theme` | `dark` | `dark` or anything else for light |
+| `theme` | `dark` | `dark`, `light`, or `aurora` |
 | `water_goal` | `2.0` | daily water goal in litres (set by the Settings window) |
 | `weather_enabled` | `true` | set to `false` to disable weather (no network call) |
 | `weather_lat` | `51.5074` | latitude, -90 to 90 (default is London) |

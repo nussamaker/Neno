@@ -29,7 +29,7 @@ fn main() {
     // Load theme from settings.
     let settings = settings::Settings::load();
     if let Some(t) = settings.get("theme") {
-        notch::set_theme(t == "dark");
+        notch::set_theme(notch::Theme::from_key(t));
     }
 
     // Create and show the notch window FIRST so the user sees something immediately.

@@ -169,7 +169,7 @@ fn repaint(hwnd: HWND) {
 unsafe fn paint(hwnd: HWND) {
     let mut ps = PAINTSTRUCT::default();
     let hdc = BeginPaint(hwnd, &mut ps);
-    ui::fill(hdc, 0, 0, W, H, ui::BG);
+    ui::paint_bg(hdc, W, H);
 
     let f_title = ui::font(16, 600);
     let f_body = ui::font(12, 400);
@@ -192,7 +192,7 @@ unsafe fn paint(hwnd: HWND) {
         ui::text(
             hdc,
             f_body,
-            ui::DIM,
+            ui::TEXT,
             "No tasks yet.",
             rect(16, 140, W - 16, 164),
             DT_CENTER,
