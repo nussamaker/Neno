@@ -2,7 +2,7 @@
 //! a compact black pill at the top of the screen that expands into a
 //! rounded 420x140 card with five pages (media, focus, water, to-do, shelf).
 
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicUsize, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -63,8 +63,9 @@ static LAST_INSIDE: Mutex<Option<Instant>> = Mutex::new(None);
 static HOVER_ID: AtomicUsize = AtomicUsize::new(0);
 static HOVER_TRACKING: AtomicBool = AtomicBool::new(false);
 
-/// The little mascot lives beside the clock in the closed notch. It dozes
-/// after a minute of quiet and waves when the user comes back.
+/// The little mascot lives beside the clock in the closed notch. It waves
+/// when the pointer arrives, watches it while it stays, and dozes after a
+/// minute of quiet.
 #[derive(Clone, Copy)]
 struct MascotWave {
     start: Instant,
@@ -72,6 +73,12 @@ struct MascotWave {
 }
 static MASCOT_WAVE: Mutex<Option<MascotWave>> = Mutex::new(None);
 static MASCOT_DOZING: AtomicBool = AtomicBool::new(false);
+static MASCOT_HOVER: AtomicBool = AtomicBool::new(false);
+/// Gaze offset in tenths of a pixel, so mouse-move frames only repaint when
+/// the eyes actually shift.
+static MASCOT_LOOK: Mutex<(i32, i32)> = Mutex::new((0, 0));
+/// Centre of the mascot in window coordinates, recorded by the painter.
+static MASCOT_CX: AtomicI32 = AtomicI32::new(COLLAPSED_W / 2);
 
 // Hover targets shared with the paint routines.
 const HOVER_CHEV_LEFT: usize = 1;
@@ -646,19 +653,28 @@ fn sleep_z_distance(px: f32, py: f32) -> f32 {
     d.min(sd_segment(px, py, 33.9, 12.1, 39.1, 12.1, 0.55))
 }
 
-/// Distance to the awake face and, while dozing, to the drifting Z.
-fn mascot_parts(px: f32, py: f32, mood: MascotMood, phase: usize) -> (f32, f32) {
+/// Distance to the awake face and, while dozing, to the drifting Z. `look`
+/// shifts the eyes and paw toward the pointer.
+fn mascot_parts(
+    px: f32,
+    py: f32,
+    mood: MascotMood,
+    phase: usize,
+    look: (f32, f32),
+) -> (f32, f32) {
+    let lx = px - look.0;
+    let ly = py - look.1;
     match mood {
         MascotMood::Open => {
-            let eyes = sd_stadium(px, py, 16.0, 19.2, 2.8, 5.3, 2.8)
-                .min(sd_stadium(px, py, 28.0, 19.2, 2.8, 5.3, 2.8));
-            (eyes.min(paw_distance(px, py, 0.0, 0.0)), f32::MAX)
+            let eyes = sd_stadium(lx, ly, 16.0, 19.2, 2.8, 5.3, 2.8)
+                .min(sd_stadium(lx, ly, 28.0, 19.2, 2.8, 5.3, 2.8));
+            (eyes.min(paw_distance(lx, ly, 0.0, 0.0)), f32::MAX)
         }
         MascotMood::Waving => {
             let dx = [0.0, -1.1, 0.0, 1.1][phase & 3];
             let dy = [0.0, -0.8, -1.6, -0.8][phase & 3];
-            let eyes = happy_eye_distance(px, py, 16.0).min(happy_eye_distance(px, py, 28.0));
-            (eyes.min(paw_distance(px, py, dx, dy - 6.2)), f32::MAX)
+            let eyes = happy_eye_distance(lx, ly, 16.0).min(happy_eye_distance(lx, ly, 28.0));
+            (eyes.min(paw_distance(lx, ly, dx, dy - 6.2)), f32::MAX)
         }
         MascotMood::Dozing => {
             let eyes = sd_stadium(px, py, 16.0, 19.5, 3.0, 1.0, 1.0)
@@ -700,6 +716,7 @@ unsafe fn draw_mascot(
     mood: MascotMood,
     phase: usize,
     glow: f32,
+    look: (f32, f32),
 ) {
     let w = MASCOT_SPRITE_W as usize;
     let h = MASCOT_H as usize;
@@ -709,7 +726,8 @@ unsafe fn draw_mascot(
     let mut sprite = vec![0u32; w * h];
     for py in 0..h {
         for px in 0..w {
-            let (body_d, z_d) = mascot_parts(px as f32 + 0.5, py as f32 + 0.5, mood, phase);
+            let (body_d, z_d) =
+                mascot_parts(px as f32 + 0.5, py as f32 + 0.5, mood, phase, look);
             let core = smooth_edge(body_d).max(smooth_edge(z_d) * 0.72);
             let bloom = bloom_amount(body_d, glow).max(bloom_amount(z_d, glow) * 0.72);
             // Fade the bloom into the transparent padding so the sprite's
@@ -955,7 +973,7 @@ unsafe fn paint(hwnd: HWND) {
         let wave = current_wave();
         let mood = if wave.is_some() {
             MascotMood::Waving
-        } else if MASCOT_DOZING.load(Ordering::Relaxed) {
+        } else if MASCOT_DOZING.load(Ordering::Relaxed) && !MASCOT_HOVER.load(Ordering::Relaxed) {
             MascotMood::Dozing
         } else {
             MascotMood::Open
@@ -968,7 +986,12 @@ unsafe fn paint(hwnd: HWND) {
         let text_w = text_width(hdc, f_clock, &clock);
         let group_w = MASCOT_W + MASCOT_GAP + text_w;
         let left = ((COLLAPSED_W - group_w) / 2).max(6);
-        draw_mascot(hdc, left, p.text, mood, phase, 0.38);
+        MASCOT_CX.store(left + MASCOT_W / 2, Ordering::Relaxed);
+        let look = MASCOT_LOOK
+            .lock()
+            .map(|l| (l.0 as f32 / 10.0, l.1 as f32 / 10.0))
+            .unwrap_or((0.0, 0.0));
+        draw_mascot(hdc, left, p.text, mood, phase, 0.38, look);
         draw_text(
             hdc,
             f_clock,
@@ -1884,7 +1907,10 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                     if MASCOT_DOZING.swap(false, Ordering::Relaxed) {
                         start_wave(hwnd, 2400);
                     }
-                } else if idle > 60_000 && !EXPANDED.load(Ordering::Relaxed) {
+                } else if idle > 60_000
+                    && !EXPANDED.load(Ordering::Relaxed)
+                    && !MASCOT_HOVER.load(Ordering::Relaxed)
+                {
                     if !MASCOT_DOZING.swap(true, Ordering::Relaxed) {
                         unsafe { let _ = InvalidateRect(hwnd, None, false); }
                     }
@@ -1957,6 +1983,35 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 };
                 let _ = unsafe { TrackMouseEvent(&mut tme) };
             }
+            if EXPANDED.load(Ordering::Relaxed) {
+                MASCOT_HOVER.store(false, Ordering::Relaxed);
+            } else {
+                // The mascot greets the pointer once, then watches it move.
+                if !MASCOT_HOVER.swap(true, Ordering::Relaxed) {
+                    start_wave(hwnd, 1400);
+                }
+                let cx = MASCOT_CX.load(Ordering::Relaxed);
+                let nx = ((x - cx) as f32 / 42.0).clamp(-1.0, 1.0);
+                let ny = ((y - 15) as f32 / 15.0).clamp(-1.0, 1.0);
+                let next = (
+                    (nx * 1.8 * 10.0).round() as i32,
+                    (ny * 1.2 * 10.0).round() as i32,
+                );
+                let changed = MASCOT_LOOK
+                    .lock()
+                    .map(|mut l| {
+                        if *l != next {
+                            *l = next;
+                            true
+                        } else {
+                            false
+                        }
+                    })
+                    .unwrap_or(false);
+                if changed {
+                    unsafe { let _ = InvalidateRect(hwnd, None, false); }
+                }
+            }
             let id = hotspot(x, y);
             if id != HOVER_ID.load(Ordering::Relaxed) {
                 HOVER_ID.store(id, Ordering::Relaxed);
@@ -1966,7 +2021,12 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
         }
         WM_MOUSELEAVE => {
             HOVER_TRACKING.store(false, Ordering::Relaxed);
-            if HOVER_ID.swap(0, Ordering::Relaxed) != 0 {
+            let was_hover = MASCOT_HOVER.swap(false, Ordering::Relaxed);
+            if let Ok(mut l) = MASCOT_LOOK.lock() {
+                *l = (0, 0);
+            }
+            let had_hotspot = HOVER_ID.swap(0, Ordering::Relaxed) != 0;
+            if was_hover || had_hotspot {
                 unsafe { let _ = InvalidateRect(hwnd, None, false); }
             }
             LRESULT(0)

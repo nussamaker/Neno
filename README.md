@@ -13,7 +13,7 @@ The latest installer is on the [Releases page](https://github.com/nussamaker/Nen
 - **Notch overlay** — Nusa-style compact clock pill at the top of the screen that expands into a rounded five-page card (media, focus, water, to-do, shelf), custom GDI drawing, always-on-top
 - **Black theme** — one Nusa-style black palette throughout: pure-black notch, white text, silver accents, and dark utility windows; Light and Aurora were removed in v1.0.5
 - **App icon** — black rounded-square tile with a white cat-head mark and negative-space capsule eyes; a 16–256 px `.ico` with hand-tuned 16/20/24/32 frames, loaded at the notification area's actual DPI
-- **Mascot** — the original Nusa character lives beside the clock in the collapsed pill: antialiased capsule eyes and a soft paw with a gentle bloom, centered with the clock as one group; it waves with `^ ^` eyes on launch and when you return, and dozes off (closed slits + “Z”) after 1 minute without input
+- **Mascot** — the original Nusa character lives beside the clock in the collapsed pill: antialiased capsule eyes and a soft paw with a gentle bloom, centered with the clock as one group; it waves with `^ ^` eyes on launch, when the pointer enters the pill, and when you return, keeps its eyes and paw on the pointer while you hover, and dozes off (closed slits + “Z”) after 1 minute without input
 - **Media** — now-playing via WinRT, album art placeholder, progress bar, play/pause and skip controls, LRCLIB lyrics fetch + local cache
 - **Navigation** — click the pill to expand, click the page dots or side chevrons, scroll the mouse wheel, right-click or move away to collapse
 - **Focus timer** — Pomodoro (25 min focus / 5 min short break / 15 min long break)
