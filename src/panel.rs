@@ -211,7 +211,7 @@ unsafe fn paint(hwnd: HWND) {
             if hover == HOVER_TASK + scroll + vi {
                 ui::round(hdc, 10, y, W - 10, y + ROW_H, 8, ui::ROW_HOVER);
             }
-            ui::checkbox(hdc, 16, y + 5, item.done, ui::GREEN);
+            ui::checkbox(hdc, 16, y + 5, item.done, ui::ACCENT);
             let color = if item.done { ui::DONE } else { ui::TEXT };
             ui::text(
                 hdc,
@@ -238,7 +238,7 @@ unsafe fn paint(hwnd: HWND) {
         water.goal_liters
     );
     ui::text(hdc, f_small, ui::DIM, &value, rect(150, 302, W - 16, 324), DT_RIGHT);
-    ui::progress(hdc, 16, 328, W - 16, water.progress(), ui::GREEN, ui::TRACK);
+    ui::progress(hdc, 16, 328, W - 16, water.progress(), ui::ACCENT, ui::TRACK);
     let pct = format!("{:.0}% of daily goal", water.progress() * 100.0);
     ui::text(hdc, f_tiny, ui::DIM, &pct, rect(16, 338, 240, 356), DT_LEFT);
     if water.snoozed {
@@ -252,7 +252,21 @@ unsafe fn paint(hwnd: HWND) {
         );
     }
 
-    ui::pill(hdc, 16, 360, 112, 28, if hover == HOVER_DRANK { ui::GREEN_HI } else { ui::GREEN }, 0x00000000, "Drank +250", f_btn);
+    ui::pill(
+        hdc,
+        16,
+        360,
+        112,
+        28,
+        if hover == HOVER_DRANK {
+            ui::ACCENT_HI
+        } else {
+            ui::ACCENT
+        },
+        ui::ACCENT_FG,
+        "Drank +250",
+        f_btn,
+    );
     ui::pill(hdc, 136, 360, 86, 28, if hover == HOVER_SNOOZE { ui::HOVER } else { ui::CARD }, ui::TEXT, "Snooze", f_btn);
     ui::pill(hdc, 230, 360, 94, 28, if hover == HOVER_RESET { ui::HOVER } else { ui::CARD }, ui::TEXT, "Reset", f_btn);
 

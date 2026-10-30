@@ -299,8 +299,9 @@ struct Palette {
     dim: u32,
     sub: u32,
     faint: u32,
-    green: u32,
-    green_hi: u32,
+    accent: u32,
+    accent_hi: u32,
+    accent_fg: u32,
     hover: u32,
     chev: u32,
     art: u32,
@@ -315,8 +316,9 @@ fn palette() -> Palette {
         dim: 0x00938E8E,   // #8E8E93
         sub: 0x00595959,   // #595959 (Nusa's secondary text)
         faint: 0x003C3A3A, // #3A3A3C
-        green: 0x0058D130, // #30D158
-        green_hi: 0x006DE24B,
+        accent: 0x00EEE9E9,    // #E9E9EE silver
+        accent_hi: 0x00FFFFFF, // #FFFFFF
+        accent_fg: 0x000D0B0B, // near-black glyphs on silver
         hover: 0x004A4A4E,
         chev: 0x00474747,   // #474747 (Nusa's chevron disc)
         art: 0x001E1C1C,   // #1C1C1E
@@ -960,7 +962,7 @@ unsafe fn paint_header(
     let start = (EXPANDED_W - total) / 2 + 10;
     // Calibrated against the native capture: the icon and date sit a little
     // further right than the slot math suggests, while the time stays anchored.
-    status_icon(hdc, start + 11, 18, p.green, p.text);
+    status_icon(hdc, start + 11, 18, p.dim, p.text);
     draw_text(
         hdc,
         f_date,
@@ -1165,9 +1167,9 @@ unsafe fn paint_focus(
     );
 
     let start_label = if running { "Pause" } else { "Start" };
-    let start_bg = if hover_is(HOVER_FOCUS_START) { p.green_hi } else { p.green };
+    let start_bg = if hover_is(HOVER_FOCUS_START) { p.accent_hi } else { p.accent };
     let reset_bg = if hover_is(HOVER_FOCUS_RESET) { p.hover } else { p.faint };
-    button(hdc, EXPANDED_W / 2 - 78, 98, 72, 22, start_bg, 0x00000000, start_label, f_btn);
+    button(hdc, EXPANDED_W / 2 - 78, 98, 72, 22, start_bg, p.accent_fg, start_label, f_btn);
     button(hdc, EXPANDED_W / 2 + 8, 98, 70, 22, reset_bg, p.text, "Reset", f_btn);
 
     let _ = WEATHER.lock().map(|w| w.len());
@@ -1196,7 +1198,7 @@ unsafe fn paint_water(
         RECT { left: 0, top: 40, right: EXPANDED_W, bottom: 70 },
         DT_CENTER,
     );
-    progress_bar(hdc, 60, 76, EXPANDED_W - 60, pct, p.green, p.track);
+    progress_bar(hdc, 60, 76, EXPANDED_W - 60, pct, p.accent, p.track);
     draw_text(
         hdc,
         f_small,
@@ -1205,10 +1207,10 @@ unsafe fn paint_water(
         RECT { left: 0, top: 82, right: EXPANDED_W, bottom: 96 },
         DT_CENTER,
     );
-    let drank_bg = if hover_is(HOVER_WATER_DRANK) { p.green_hi } else { p.green };
+    let drank_bg = if hover_is(HOVER_WATER_DRANK) { p.accent_hi } else { p.accent };
     let snooze_bg = if hover_is(HOVER_WATER_SNOOZE) { p.hover } else { p.faint };
     let reset_bg = if hover_is(HOVER_WATER_RESET) { p.hover } else { p.faint };
-    button(hdc, EXPANDED_W / 2 - 112, 100, 78, 22, drank_bg, 0x00000000, "Drank +250", f_btn);
+    button(hdc, EXPANDED_W / 2 - 112, 100, 78, 22, drank_bg, p.accent_fg, "Drank +250", f_btn);
     button(hdc, EXPANDED_W / 2 - 26, 100, 60, 22, snooze_bg, p.text, "Snooze", f_btn);
     button(hdc, EXPANDED_W / 2 + 42, 100, 60, 22, reset_bg, p.text, "Reset", f_btn);
 }

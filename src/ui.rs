@@ -2,7 +2,7 @@
 //!
 //! The notch paints itself with its own copy of these primitives; this module
 //! keeps the utility windows in the same visual language (dark card, Segoe UI,
-//! soft rounded shapes, green accent).
+//! soft rounded shapes, silver accent).
 
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{COLORREF, HWND, RECT};
@@ -25,8 +25,10 @@ pub const HOVER: u32 = 0x002F2F33;
 pub const TEXT: u32 = 0x00FFFFFF;
 pub const DIM: u32 = 0x00938E8E;
 pub const FAINT: u32 = 0x003A3A3C;
-pub const GREEN: u32 = 0x0058D130;
-pub const GREEN_HI: u32 = 0x006DE24B;
+pub const ACCENT: u32 = 0x00EEE9E9;
+pub const ACCENT_HI: u32 = 0x00FFFFFF;
+/// Text and glyphs drawn on top of the accent.
+pub const ACCENT_FG: u32 = 0x000D0B0B;
 pub const TRACK: u32 = 0x00303030;
 pub const DONE: u32 = 0x006A6A6E;
 
@@ -148,7 +150,7 @@ pub unsafe fn checkbox(hdc: HDC, x: i32, y: i32, checked: bool, accent: u32) {
     let size = 14;
     if checked {
         round(hdc, x, y, x + size, y + size, 8, accent);
-        let pen = CreatePen(PS_SOLID, 2, COLORREF(0x00FFFFFF));
+        let pen = CreatePen(PS_SOLID, 2, COLORREF(ACCENT_FG));
         let old = SelectObject(hdc, HGDIOBJ(pen.0));
         MoveToEx(hdc, x + 3, y + 7, None);
         let _ = LineTo(hdc, x + 6, y + 10);

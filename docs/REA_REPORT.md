@@ -337,10 +337,11 @@ Self-description found in `.rdata`:
 A byte-preserving rebrand to **Neno** was produced from copies of the original
 artifacts (originals left untouched):
 
-- `E:\NusaSetup\renamed\NenoSetup.exe` (SHA-256 `2676F25276A2E3328E991295154693323F85DCDEECAEC5C16780E39CC0F95304`, 3,356,230 bytes) - packages the v1.0.6 black-tile icon build (GUI subsystem, no console); the setup icon is patched in place with the same 9-frame group
-- Embedded payload `neno.exe` (2,504,192 bytes, SHA-256 `6DC6248072F4F8A2EBBDD5FB2A1B2EFF84D97DCB745CE45F07F37D1C65418855`); verified by a silent install and hash comparison against `target\release\neno.exe`
+- `E:\NusaSetup\renamed\NenoSetup.exe` (SHA-256 `994B3FAC2787ADDE94C76997DD21A1E7158F6DC96852707037EA1B890AB3AB94`, 3,357,339 bytes) - packages the v1.0.7 silver-accent build (GUI subsystem, no console); the setup icon is patched in place with the same 9-frame group
+- Embedded payload `neno.exe` (2,504,192 bytes, SHA-256 `47F963350C01086C4D7D0A94CF2BEC3ADBD89225BBBE60F8607C29425AC5B2BC`); verified by a silent install and hash comparison against `target\release\neno.exe`
 - `E:\NusaSetup\renamed\app\neno.exe` - same 2,504,192-byte payload and SHA-256 as above
-- Previous release: v1.0.5 installer 3,438,053 bytes, SHA-256 `812A7E1AC863D86511CDF5B03CFD8CB1415BC46A63EF90827EE1EBA53F426998`; payload 2,610,688 bytes, SHA-256 `434E59BA011F175A62B067D55959276CEEE4E840552FDC2C904C60410D5B13F5`
+- Previous release: v1.0.6 installer 3,356,230 bytes, SHA-256 `2676F25276A2E3328E991295154693323F85DCDEECAEC5C16780E39CC0F95304`; payload 2,504,192 bytes, SHA-256 `6DC6248072F4F8A2EBBDD5FB2A1B2EFF84D97DCB745CE45F07F37D1C65418855`
+- v1.0.5 installer 3,438,053 bytes, SHA-256 `812A7E1AC863D86511CDF5B03CFD8CB1415BC46A63EF90827EE1EBA53F426998`; payload 2,610,688 bytes, SHA-256 `434E59BA011F175A62B067D55959276CEEE4E840552FDC2C904C60410D5B13F5`
 - v1.0.4 installer 3,446,044 bytes, SHA-256 `B5B1C59BA7DD8C264530925C27FA667ED937AE1CA1BAAB1187A2E1E39E47E457`; payload 2,624,512 bytes, SHA-256 `2E455FBDA2390992A606DE10031AEEEE61FCF507AFA642FAB774FC3E1C23B1D8`
 - v1.0.3 installer 3,442,366 bytes, SHA-256 `10A80DBB5E483130974379FF16BBEC0FD713B6E916544C454EAA84156A7300DF`; payload 2,611,712 bytes, SHA-256 `397CC53D8F2B8821EFA6209D3769A39B2D3EF5A0CB35770B539F5568E3B44997`
 - Earlier release: v1.0.2 installer 3,328,404 bytes, SHA-256 `89F5BF55224810E6B7FEF5BA79F90335903E52BFDA9D2E9B57AED41C222F43B7`; payload 2,496,512 bytes, SHA-256 `E43FB95193C7A03517A3AFC75DD5AACEDE06E1770B4E2267FD354AED824F9C0C`
@@ -473,6 +474,25 @@ icon and makes the notification area use the frame drawn for its current DPI:
 - Verified live: installed v1.0.6 (Settings reports `Neno 1.0.6`), black notch,
   new tray icon in the overflow, and the new shell icon on both `NenoSetup.exe`
   and `neno.exe`.
+
+### v1.0.7 - Silver accent
+
+The v1.0.7 build replaces the last green UI accent with a neutral silver one,
+keeping the app strictly black-and-white:
+
+- `ui.rs` now defines `ACCENT` `#E9E9EE`, `ACCENT_HI` `#FFFFFF`, and
+  `ACCENT_FG` `#0B0B0D`. The green `#30D158` / `#6DE24B` pair is gone; no green
+  references remain in `ui.rs`, `notch.rs`, `panel.rs`, or
+  `settings_window.rs`.
+- Applied to the Settings ON pills, to-do checkboxes, water progress fills, the
+  notch focus Start/Pause button, the notch and panel Drank buttons, and the
+  header status mark. Labels and checkmarks on silver switch to near-black so
+  they stay legible; the status ring stays gray with a white sparkle so the
+  two-tone mark survives at 16 px.
+- Geometry, layout, mascot animation, and behavior are unchanged.
+- Verified live: installed v1.0.7 (Settings reports `Neno 1.0.7`), silver ON
+  pills with black labels, 62% water progress, a checked to-do item, and the
+  expanded focus and water pages.
 
 ## 6. Evidence and reproducibility
 
