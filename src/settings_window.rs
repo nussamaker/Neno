@@ -20,7 +20,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use crate::ui;
 
 const W: i32 = 360;
-const H: i32 = 330;
+const H: i32 = 270;
 const WM_MOUSELEAVE: u32 = 0x02A3;
 const STYLE: WINDOW_STYLE = WINDOW_STYLE(WS_CAPTION.0 | WS_SYSMENU.0 | WS_MINIMIZEBOX.0);
 
@@ -110,8 +110,6 @@ fn hover_target(y: i32) -> usize {
         2
     } else if (164..204).contains(&y) {
         3
-    } else if (212..252).contains(&y) {
-        4
     } else {
         0
     }
@@ -176,31 +174,18 @@ unsafe fn paint(hwnd: HWND) {
         f_value,
     );
 
-    let theme = crate::notch::theme();
-    row(
-        hdc,
-        164,
-        "Theme",
-        theme.label(),
-        0x00303033,
-        ui::TEXT,
-        hover == 3,
-        f_body,
-        f_value,
-    );
-
     let weather = crate::settings::Settings::load()
         .get("weather_enabled")
         .map(|v| v.trim() != "false")
         .unwrap_or(true);
     row(
         hdc,
-        212,
+        164,
         "Weather",
         if weather { "ON" } else { "OFF" },
         if weather { ui::GREEN } else { ui::FAINT },
         if weather { 0x00000000 } else { ui::DIM },
-        hover == 4,
+        hover == 3,
         f_body,
         f_value,
     );
@@ -210,7 +195,7 @@ unsafe fn paint(hwnd: HWND) {
         f_tiny,
         ui::DIM,
         "Click a row to change  ·  Esc to close",
-        rect(18, 268, W - 18, 286),
+        rect(18, 220, W - 18, 238),
         DT_LEFT,
     );
     ui::text(
@@ -218,7 +203,7 @@ unsafe fn paint(hwnd: HWND) {
         f_tiny,
         ui::DIM,
         "Changes are saved automatically",
-        rect(18, 286, W - 18, 304),
+        rect(18, 238, W - 18, 256),
         DT_LEFT,
     );
 
@@ -290,12 +275,6 @@ unsafe extern "system" fn settings_proc(
                     crate::autostart::set_autostart(enabled, &exe);
                 }
             } else if (164..204).contains(&y) {
-                let next = crate::notch::theme().next();
-                crate::notch::set_theme(next);
-                let mut settings = crate::settings::Settings::load();
-                settings.set("theme", next.key());
-                settings.save();
-            } else if (212..252).contains(&y) {
                 let mut settings = crate::settings::Settings::load();
                 let currently_off = settings
                     .get("weather_enabled")

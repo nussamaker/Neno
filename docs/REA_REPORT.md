@@ -337,10 +337,11 @@ Self-description found in `.rdata`:
 A byte-preserving rebrand to **Neno** was produced from copies of the original
 artifacts (originals left untouched):
 
-- `E:\NusaSetup\renamed\NenoSetup.exe` (SHA-256 `B5B1C59BA7DD8C264530925C27FA667ED937AE1CA1BAAB1187A2E1E39E47E457`, 3,446,044 bytes) - packages the v1.0.4 reconstruction build (GUI subsystem, no console)
-- Embedded payload `neno.exe` (2,624,512 bytes, SHA-256 `2E455FBDA2390992A606DE10031AEEEE61FCF507AFA642FAB774FC3E1C23B1D8`); verified by a silent install and hash comparison against `target\release\neno.exe`
-- `E:\NusaSetup\renamed\app\neno.exe` - same 2,624,512-byte payload and SHA-256 as above
-- Previous release: v1.0.3 installer 3,442,366 bytes, SHA-256 `10A80DBB5E483130974379FF16BBEC0FD713B6E916544C454EAA84156A7300DF`; payload 2,611,712 bytes, SHA-256 `397CC53D8F2B8821EFA6209D3769A39B2D3EF5A0CB35770B539F5568E3B44997`
+- `E:\NusaSetup\renamed\NenoSetup.exe` (SHA-256 `812A7E1AC863D86511CDF5B03CFD8CB1415BC46A63EF90827EE1EBA53F426998`, 3,438,053 bytes) - packages the v1.0.5 black-only build (GUI subsystem, no console)
+- Embedded payload `neno.exe` (2,610,688 bytes, SHA-256 `434E59BA011F175A62B067D55959276CEEE4E840552FDC2C904C60410D5B13F5`); verified by a silent install and hash comparison against `target\release\neno.exe`
+- `E:\NusaSetup\renamed\app\neno.exe` - same 2,610,688-byte payload and SHA-256 as above
+- Previous release: v1.0.4 installer 3,446,044 bytes, SHA-256 `B5B1C59BA7DD8C264530925C27FA667ED937AE1CA1BAAB1187A2E1E39E47E457`; payload 2,624,512 bytes, SHA-256 `2E455FBDA2390992A606DE10031AEEEE61FCF507AFA642FAB774FC3E1C23B1D8`
+- v1.0.3 installer 3,442,366 bytes, SHA-256 `10A80DBB5E483130974379FF16BBEC0FD713B6E916544C454EAA84156A7300DF`; payload 2,611,712 bytes, SHA-256 `397CC53D8F2B8821EFA6209D3769A39B2D3EF5A0CB35770B539F5568E3B44997`
 - Earlier release: v1.0.2 installer 3,328,404 bytes, SHA-256 `89F5BF55224810E6B7FEF5BA79F90335903E52BFDA9D2E9B57AED41C222F43B7`; payload 2,496,512 bytes, SHA-256 `E43FB95193C7A03517A3AFC75DD5AACEDE06E1770B4E2267FD354AED824F9C0C`
 - v1.0.1 installer 3,319,777 bytes, SHA-256 `47F20F450A7EF8F273C6D92BAEDAEC68995362514F98D8B56EA1F1A2427080E8`; payload 2,460,672 bytes, SHA-256 `51CCDC2E7382F231B7AA48AB7A80BAA92A93FD3FAC7A47E2E425C0D21CBF75F4` (retained on the Releases page)
 
@@ -426,6 +427,25 @@ renderer while keeping the same states and timings:
   reliably triggers after dozing instead of being missed by the old 700ms window.
 - Verified live in Aurora, Dark and Light (open, wave and doze), including the
   installed v1.0.4 binary (hash matches the release payload).
+
+### v1.0.5 - Black only
+
+The v1.0.5 build removes the selectable Light and Aurora themes. The app is now
+black-only, matching Nusa's original dark pill:
+
+- Deleted the `Theme` enum, the `theme` startup key, the Settings theme row, and
+  the entire Aurora renderer (`ui.rs` animated field, cached utility field, and
+  the notch's glass branch). No dormant theme code remains.
+- One pure-black palette is used everywhere: `#000000` notch fill, white text,
+  green accent, and `#161618` utility-window background. DWM caption, text, and
+  border colors are forced black so Windows accent tints do not leak into the
+  Settings frame.
+- The Settings window is tightened from 330 to 270 px client height now that the
+  theme row is gone; water goal, autostart, and weather remain.
+- Legacy `theme=` lines in `settings.txt` are ignored; no migration is needed.
+- Verified live in black (wave, open, doze), the expanded card, and the Settings
+  window, including the installed v1.0.5 binary (hash matches the release
+  payload).
 
 ## 6. Evidence and reproducibility
 

@@ -11,7 +11,7 @@ The latest installer is on the [Releases page](https://github.com/nussamaker/Nen
 ## Features
 
 - **Notch overlay** — Nusa-style compact clock pill at the top of the screen that expands into a rounded five-page card (media, focus, water, to-do, shelf), custom GDI drawing, always-on-top
-- **Themes** — Dark (default), Light, and Aurora, an animated teal/cyan/violet glass field with drifting ribbons; cycle it from Settings and it is remembered across restarts
+- **Black theme** — one Nusa-style black palette throughout: pure-black notch, white text, green accents, and dark utility windows; Light and Aurora were removed in v1.0.5
 - **Mascot** — the original Nusa character lives beside the clock in the collapsed pill: antialiased capsule eyes and a soft paw with a gentle bloom, centered with the clock as one group; it waves with `^ ^` eyes on launch and when you return, and dozes off (closed slits + “Z”) after 9 seconds without input
 - **Media** — now-playing via WinRT, album art placeholder, progress bar, play/pause and skip controls, LRCLIB lyrics fetch + local cache
 - **Navigation** — click the pill to expand, click the page dots or side chevrons, scroll the mouse wheel, right-click or move away to collapse
@@ -20,12 +20,12 @@ The latest installer is on the [Releases page](https://github.com/nussamaker/Nen
 - **To-do list** — dark task panel with checkboxes: add (type + Enter), toggle (click), remove (right-click), scroll with the wheel, persisted to `%APPDATA%\Neno\todo.txt`
 - **Shelf** — styled drop zone in the notch that lists the three newest files (newest first); file copy + `.url` Internet Shortcuts, drag-and-drop (WM_DROPFILES)
 - **Autostart** — toggle `HKCU\...\Run\Neno`
-- **System tray icon** — the cat-character icon (small eyes on an aurora badge); left-click toggles the to-do panel; right-click opens a dark menu with Toggle Panel / Toggle Notch / Settings / Quit
+- **System tray icon** — the cat-character icon; left-click toggles the to-do panel; right-click opens a dark menu with Toggle Panel / Toggle Notch / Settings / Quit
 - **Bluetooth** — paired device listing
 - **Notifications** — count via UserNotificationListener
 - **Network** — connectivity check, shared HTTP client with timeouts
 - **Weather** — Open-Meteo current conditions, cached 30 min
-- **Settings window** — dark Nusa-styled card for water goal, autostart, theme, and weather; Esc to close
+- **Settings window** — dark Nusa-styled card for water goal, autostart, and weather; Esc to close
 - **System monitor** — CPU / RAM in the notch text
 - **State migration** — auto-migrates legacy `%APPDATA%\Nusa` → `%APPDATA%\Neno`
 
@@ -94,7 +94,6 @@ Optional keys in `%APPDATA%\Neno\settings.txt` (one `key=value` per line):
 
 | Key | Default | Meaning |
 |---|---|---|
-| `theme` | `dark` | `dark`, `light`, or `aurora` |
 | `water_goal` | `2.0` | daily water goal in litres (set by the Settings window) |
 | `weather_enabled` | `true` | set to `false` to disable weather (no network call) |
 | `weather_lat` | `51.5074` | latitude, -90 to 90 (default is London) |

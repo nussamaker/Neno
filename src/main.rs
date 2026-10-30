@@ -26,12 +26,6 @@ fn main() {
     state::ensure_dirs();
     notch::init_focus();
 
-    // Load theme from settings.
-    let settings = settings::Settings::load();
-    if let Some(t) = settings.get("theme") {
-        notch::set_theme(notch::Theme::from_key(t));
-    }
-
     // Create and show the notch window FIRST so the user sees something immediately.
     let _notch = match notch::Notch::create() {
         Ok(n) => {

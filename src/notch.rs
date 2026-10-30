@@ -58,7 +58,6 @@ static PLAY_POS: AtomicUsize = AtomicUsize::new(0); // seconds
 static PLAY_LEN: AtomicUsize = AtomicUsize::new(0); // seconds
 
 static NOTCH_TEXT: Mutex<String> = Mutex::new(String::new());
-static THEME: Mutex<Theme> = Mutex::new(Theme::Dark);
 static LAST_INSIDE: Mutex<Option<Instant>> = Mutex::new(None);
 static HOVER_ID: AtomicUsize = AtomicUsize::new(0);
 static HOVER_TRACKING: AtomicBool = AtomicBool::new(false);
@@ -87,47 +86,6 @@ const HOVER_WATER_SNOOZE: usize = 51;
 const HOVER_WATER_RESET: usize = 52;
 const HOVER_SHELF_ZONE: usize = 60;
 const HOVER_TODO_CARD: usize = 61;
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum Theme {
-    Dark,
-    Light,
-    Aurora,
-}
-
-impl Theme {
-    pub fn key(self) -> &'static str {
-        match self {
-            Theme::Dark => "dark",
-            Theme::Light => "light",
-            Theme::Aurora => "aurora",
-        }
-    }
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Theme::Dark => "Dark",
-            Theme::Light => "Light",
-            Theme::Aurora => "Aurora",
-        }
-    }
-
-    pub fn from_key(s: &str) -> Self {
-        match s.trim() {
-            "light" => Theme::Light,
-            "aurora" => Theme::Aurora,
-            _ => Theme::Dark,
-        }
-    }
-
-    pub fn next(self) -> Self {
-        match self {
-            Theme::Dark => Theme::Light,
-            Theme::Light => Theme::Aurora,
-            Theme::Aurora => Theme::Dark,
-        }
-    }
-}
 
 fn hover_is(id: usize) -> bool {
     HOVER_ID.load(Ordering::Relaxed) == id
@@ -182,27 +140,6 @@ pub fn set_text(s: &str) {
 
 pub fn get_text() -> String {
     NOTCH_TEXT.lock().map(|t| t.clone()).unwrap_or_default()
-}
-
-pub fn set_theme(theme: Theme) {
-    if let Ok(mut t) = THEME.lock() {
-        *t = theme;
-    }
-    crate::ui::set_aurora(theme == Theme::Aurora);
-    if let Some(hwnd) = get_notch_hwnd() {
-        unsafe {
-            if theme == Theme::Aurora {
-                SetTimer(hwnd, 3, 66, None);
-            } else {
-                let _ = KillTimer(hwnd, 3);
-            }
-            let _ = InvalidateRect(hwnd, None, true);
-        }
-    }
-}
-
-pub fn theme() -> Theme {
-    THEME.lock().map(|t| *t).unwrap_or(Theme::Dark)
 }
 
 pub fn set_media_title(s: &str) {
@@ -372,49 +309,19 @@ struct Palette {
 }
 
 fn palette() -> Palette {
-    match theme() {
-        Theme::Dark => Palette {
-            bg: 0x00000000,
-            text: 0x00FFFFFF,
-            dim: 0x00938E8E,   // #8E8E93
-            sub: 0x00595959,   // #595959 (Nusa's secondary text)
-            faint: 0x003C3A3A, // #3A3A3C
-            green: 0x0058D130, // #30D158
-            green_hi: 0x006DE24B,
-            hover: 0x004A4A4E,
-            chev: 0x00474747,   // #474747 (Nusa's chevron disc)
-            art: 0x001E1C1C,   // #1C1C1E
-            track: 0x00303030,
-            media_track: 0x001B1B1B,
-        },
-        Theme::Light => Palette {
-            bg: 0x00F7F5F5,    // #F5F5F7
-            text: 0x001E1C1C,  // #1C1C1E
-            dim: 0x00736E6E,   // #6E6E73
-            sub: 0x008F8A8A,   // #8A8A8F
-            faint: 0x00DBD6D6, // #D6D6DB
-            green: 0x0058D130,
-            green_hi: 0x006DE24B,
-            hover: 0x00CFCFD5,
-            chev: 0x00CCC7C7,
-            art: 0x00EDE8E8,   // #E8E8ED
-            track: 0x00DCDCDC,
-            media_track: 0x00CCC7C7,
-        },
-        Theme::Aurora => Palette {
-            bg: rgb(11, 17, 22),
-            text: 0x00FFFFFF,
-            dim: rgb(168, 185, 189),   // cool grey for glass
-            sub: rgb(120, 145, 150),
-            faint: rgb(55, 75, 82),
-            green: rgb(91, 232, 198),  // mint accent
-            green_hi: rgb(124, 244, 214),
-            hover: rgb(50, 69, 75),
-            chev: rgb(37, 51, 57),
-            art: rgb(18, 29, 35),      // smoked-glass card
-            track: rgb(34, 49, 55),
-            media_track: rgb(15, 24, 29),
-        },
+    Palette {
+        bg: 0x00000000,
+        text: 0x00FFFFFF,
+        dim: 0x00938E8E,   // #8E8E93
+        sub: 0x00595959,   // #595959 (Nusa's secondary text)
+        faint: 0x003C3A3A, // #3A3A3C
+        green: 0x0058D130, // #30D158
+        green_hi: 0x006DE24B,
+        hover: 0x004A4A4E,
+        chev: 0x00474747,   // #474747 (Nusa's chevron disc)
+        art: 0x001E1C1C,   // #1C1C1E
+        track: 0x00303030,
+        media_track: 0x001B1B1B,
     }
 }
 
@@ -501,29 +408,6 @@ unsafe fn filled_poly(hdc: HDC, pts: &[POINT], color: u32) {
     SelectObject(hdc, old_brush);
     let _ = DeleteObject(HGDIOBJ(pen.0));
     let _ = DeleteObject(HGDIOBJ(brush.0));
-}
-
-const fn rgb(r: u32, g: u32, b: u32) -> u32 {
-    r | (g << 8) | (b << 16)
-}
-
-/// Animated aurora base plus a glass rim and top highlight.
-unsafe fn aurora_glass(hdc: HDC, pts: &[POINT], w: i32, h: i32) {
-    crate::ui::aurora_bg(hdc, 0, 0, w, h, crate::ui::aurora_phase(), false);
-
-    // Rim: the outer half of the pen is clipped by the window region, leaving
-    // a soft one-pixel glass edge.
-    let pen = CreatePen(PS_SOLID, 1, COLORREF(rgb(52, 78, 74)));
-    let old_pen = SelectObject(hdc, HGDIOBJ(pen.0));
-    let old_brush = SelectObject(hdc, GetStockObject(NULL_BRUSH));
-    let _ = Polygon(hdc, pts);
-    SelectObject(hdc, old_brush);
-    SelectObject(hdc, old_pen);
-    let _ = DeleteObject(HGDIOBJ(pen.0));
-
-    // Sheen along the flat top edge.
-    let inset = if w > 200 { 36 } else { 26 };
-    fill(hdc, inset, 1, w - inset, 2, rgb(70, 96, 90));
 }
 
 unsafe fn circle(hdc: HDC, cx: i32, cy: i32, r: i32, color: u32) {
@@ -976,11 +860,7 @@ unsafe fn paint(hwnd: HWND) {
             COLLAPSED_SHOULDER,
             COLLAPSED_RADIUS,
         );
-        if theme() == Theme::Aurora {
-            aurora_glass(hdc, &pts, COLLAPSED_W, COLLAPSED_H);
-        } else {
-            filled_poly(hdc, &pts, p.bg);
-        }
+        filled_poly(hdc, &pts, p.bg);
         let (clock, _) = now_parts();
         let f_clock = make_font(17, FW_SEMIBOLD.0);
         let wave = current_wave();
@@ -999,12 +879,7 @@ unsafe fn paint(hwnd: HWND) {
         let text_w = text_width(hdc, f_clock, &clock);
         let group_w = MASCOT_W + MASCOT_GAP + text_w;
         let left = ((COLLAPSED_W - group_w) / 2).max(6);
-        let glow = match theme() {
-            Theme::Aurora => 0.50,
-            Theme::Dark => 0.38,
-            Theme::Light => 0.12,
-        };
-        draw_mascot(hdc, left, p.text, mood, phase, glow);
+        draw_mascot(hdc, left, p.text, mood, phase, 0.38);
         draw_text(
             hdc,
             f_clock,
@@ -1030,11 +905,7 @@ unsafe fn paint(hwnd: HWND) {
         EXPANDED_SHOULDER,
         EXPANDED_RADIUS,
     );
-    if theme() == Theme::Aurora {
-        aurora_glass(hdc, &pts, EXPANDED_WINDOW_W, EXPANDED_H);
-    } else {
-        filled_poly(hdc, &pts, p.bg);
-    }
+    filled_poly(hdc, &pts, p.bg);
     let _ = SetViewportOrgEx(hdc, EXPANDED_SHOULDER, 0, None);
     let f_date = make_font(13, FW_NORMAL.0);
     let f_time = make_font(14, FW_BOLD.0);
@@ -1129,11 +1000,7 @@ unsafe fn paint_media(
 
     // Album art placeholder, sized and placed like Nusa's 62px tile.
     let art = CreateSolidBrush(COLORREF(p.art));
-    let art_pen = CreatePen(
-        PS_SOLID,
-        1,
-        COLORREF(if theme() == Theme::Aurora { p.faint } else { p.art }),
-    );
+    let art_pen = CreatePen(PS_SOLID, 1, COLORREF(p.art));
     let old_brush = SelectObject(hdc, HGDIOBJ(art.0));
     let old_pen = SelectObject(hdc, HGDIOBJ(art_pen.0));
     RoundRect(hdc, 44, 12, 107, 75, 14, 14);
@@ -1832,9 +1699,6 @@ impl Notch {
             SetTimer(hwnd, 1, 1000, None);
             SetTimer(hwnd, 2, 1800000, None);
             set_notch_hwnd(hwnd);
-            if theme() == Theme::Aurora {
-                SetTimer(hwnd, 3, 66, None);
-            }
             // Say hello as soon as the notch appears.
             start_wave(hwnd, 3000);
             apply_region(hwnd, COLLAPSED_W, COLLAPSED_H, COLLAPSED_BODY_W, COLLAPSED_SHOULDER, COLLAPSED_RADIUS);
@@ -1875,12 +1739,6 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                     if let Ok(mut w) = MASCOT_WAVE.lock() {
                         *w = None;
                     }
-                    unsafe { let _ = InvalidateRect(hwnd, None, false); }
-                }
-                return LRESULT(0);
-            }
-            if wparam.0 == 3 {
-                if theme() == Theme::Aurora {
                     unsafe { let _ = InvalidateRect(hwnd, None, false); }
                 }
                 return LRESULT(0);
