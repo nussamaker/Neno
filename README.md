@@ -12,7 +12,7 @@ The latest installer is on the [Releases page](https://github.com/nussamaker/Nen
 
 - **Notch overlay** — Nusa-style compact clock pill at the top of the screen that expands into a rounded five-page card (media, focus, water, to-do, shelf), custom GDI drawing, always-on-top
 - **Themes** — Dark (default), Light, and Aurora, an animated teal/cyan/violet glass field with drifting ribbons; cycle it from Settings and it is remembered across restarts
-- **Mascot** — the original Nusa character lives beside the clock in the collapsed pill: small capsule eyes and a pixel-art mitten that rests, waves on launch and when you return, and dozes off (closed slits + “Z”) after 9 seconds without input
+- **Mascot** — the original Nusa character lives beside the clock in the collapsed pill: antialiased capsule eyes and a soft paw with a gentle bloom, centered with the clock as one group; it waves with `^ ^` eyes on launch and when you return, and dozes off (closed slits + “Z”) after 9 seconds without input
 - **Media** — now-playing via WinRT, album art placeholder, progress bar, play/pause and skip controls, LRCLIB lyrics fetch + local cache
 - **Navigation** — click the pill to expand, click the page dots or side chevrons, scroll the mouse wheel, right-click or move away to collapse
 - **Focus timer** — Pomodoro (25 min focus / 5 min short break / 15 min long break)

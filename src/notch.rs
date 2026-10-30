@@ -9,13 +9,14 @@ use std::time::{Duration, Instant};
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM};
 use windows::Win32::Graphics::Gdi::{
-    BeginPaint, CreateFontW, CreatePen, CreatePolygonRgn, CreateSolidBrush, DeleteObject, DrawTextW,
-    Ellipse, EndPaint, FillRect, GetStockObject, GetTextExtentPoint32W, InvalidateRect, LineTo,
-    MoveToEx, Polygon, RoundRect, SelectObject, SetBkMode, SetTextColor, SetViewportOrgEx, SetWindowRgn,
-    TextOutW,
-    ALTERNATE, ANTIALIASED_QUALITY, DEFAULT_CHARSET, DRAW_TEXT_FORMAT, DT_CENTER, DT_END_ELLIPSIS,
-    DT_LEFT, DT_RIGHT, DT_SINGLELINE, DT_VCENTER, FF_DONTCARE, FW_BOLD, FW_NORMAL, FW_SEMIBOLD,
-    HDC, HFONT, HGDIOBJ, NULL_BRUSH, NULL_PEN, PAINTSTRUCT, PS_SOLID, TRANSPARENT,
+    AlphaBlend, BeginPaint, CreateCompatibleDC, CreateDIBSection, CreateFontW, CreatePen,
+    CreatePolygonRgn, CreateSolidBrush, DeleteDC, DeleteObject, DrawTextW, Ellipse, EndPaint,
+    FillRect, GetStockObject, GetTextExtentPoint32W, InvalidateRect, LineTo, MoveToEx, Polygon,
+    RoundRect, SelectObject, SetBkMode, SetTextColor, SetViewportOrgEx, SetWindowRgn, TextOutW,
+    AC_SRC_ALPHA, AC_SRC_OVER, ALTERNATE, ANTIALIASED_QUALITY, BI_RGB, BITMAPINFO,
+    BITMAPINFOHEADER, BLENDFUNCTION, DEFAULT_CHARSET, DIB_RGB_COLORS, DRAW_TEXT_FORMAT, DT_CENTER,
+    DT_END_ELLIPSIS, DT_LEFT, DT_RIGHT, DT_SINGLELINE, DT_VCENTER, FF_DONTCARE, FW_BOLD, FW_NORMAL,
+    FW_SEMIBOLD, HDC, HFONT, HGDIOBJ, NULL_BRUSH, NULL_PEN, PAINTSTRUCT, PS_SOLID, TRANSPARENT,
 };
 use windows::Win32::System::SystemInformation::{GetLocalTime, GetTickCount};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
@@ -599,55 +600,117 @@ fn start_wave(hwnd: HWND, ms: u64) {
     }
 }
 
-/// A small vertical capsule, used for the mascot's open eyes.
-unsafe fn vcapsule(hdc: HDC, cx: i32, cy: i32, w: i32, h: i32, color: u32) {
-    let brush = CreateSolidBrush(COLORREF(color));
-    let old_brush = SelectObject(hdc, HGDIOBJ(brush.0));
-    let old_pen = SelectObject(hdc, GetStockObject(NULL_PEN));
-    let _ = RoundRect(hdc, cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2, w, w);
-    SelectObject(hdc, old_pen);
-    SelectObject(hdc, old_brush);
-    let _ = DeleteObject(HGDIOBJ(brush.0));
+/// The mascot sprite is rasterized from signed-distance shapes with a soft
+/// bloom, then alpha-blended as one piece. Drawing it with 1px GDI primitives
+/// made the eyes and paw read as hard, separate blobs at this size.
+const MASCOT_W: i32 = 30;
+const MASCOT_PAD: i32 = 13;
+const MASCOT_SPRITE_W: i32 = MASCOT_W + MASCOT_PAD * 2;
+const MASCOT_H: i32 = 30;
+const MASCOT_GAP: i32 = 8;
+
+fn sd_stadium(
+    px: f32,
+    py: f32,
+    cx: f32,
+    cy: f32,
+    half_w: f32,
+    half_h: f32,
+    r: f32,
+) -> f32 {
+    let qx = (px - cx).abs() - (half_w - r);
+    let qy = (py - cy).abs() - (half_h - r);
+    let ox = qx.max(0.0);
+    let oy = qy.max(0.0);
+    (ox * ox + oy * oy).sqrt() + qx.max(qy).min(0.0) - r
 }
 
-// A 10px mitten: three fingers, a thumb on the left, and a short wrist.
-// Drawn as pixels so the silhouette stays readable at notch scale.
-const MASCOT_HAND: [&str; 12] = [
-    "..##.##.##",
-    "..##.##.##",
-    "..##.##.##",
-    ".#########",
-    "##########",
-    "###.######",
-    "###.######",
-    ".#########",
-    "..########",
-    "...######.",
-    "...######.",
-    "....####..",
-];
+fn sd_ellipse(px: f32, py: f32, cx: f32, cy: f32, rx: f32, ry: f32) -> f32 {
+    let nx = (px - cx) / rx;
+    let ny = (py - cy) / ry;
+    ((nx * nx + ny * ny).sqrt() - 1.0) * rx.min(ry)
+}
 
-/// The phase shifts the hand a pixel or two so it reads as a wave.
-unsafe fn mascot_paw(hdc: HDC, x: i32, y: i32, color: u32, phase: usize) {
-    let dx = [0, -1, 0, 1][phase & 3];
-    let dy = [0, -1, -2, -1][phase & 3];
-    let x = x + dx;
-    let y = y + dy;
-    for (row, line) in MASCOT_HAND.iter().enumerate() {
-        for (col, ch) in line.bytes().enumerate() {
-            if ch == b'#' {
-                let px = x + col as i32;
-                let py = y + row as i32;
-                fill(hdc, px, py, px + 1, py + 1, color);
-            }
+fn sd_segment(px: f32, py: f32, ax: f32, ay: f32, bx: f32, by: f32, r: f32) -> f32 {
+    let vx = bx - ax;
+    let vy = by - ay;
+    let wx = px - ax;
+    let wy = py - ay;
+    let t = ((wx * vx + wy * vy) / (vx * vx + vy * vy)).clamp(0.0, 1.0);
+    let dx = wx - t * vx;
+    let dy = wy - t * vy;
+    (dx * dx + dy * dy).sqrt() - r
+}
+
+/// A rounded "^" eye, built as a stroked quadratic curve like Nusa's wake face.
+fn happy_eye_distance(px: f32, py: f32, cx: f32) -> f32 {
+    let mut d = f32::MAX;
+    let mut prev = (cx - 2.8, 20.8);
+    for i in 1..=12 {
+        let t = i as f32 / 12.0;
+        let mt = 1.0 - t;
+        let x = mt * mt * (cx - 2.8) + 2.0 * mt * t * cx + t * t * (cx + 2.8);
+        let y = mt * mt * 20.8 + 2.0 * mt * t * 14.8 + t * t * 20.8;
+        d = d.min(sd_segment(px, py, prev.0, prev.1, x, y, 0.62));
+        prev = (x, y);
+    }
+    d
+}
+
+fn paw_distance(px: f32, py: f32, dx: f32, dy: f32) -> f32 {
+    let x = px - dx;
+    let y = py - dy;
+    let mut d = sd_ellipse(x, y, 39.0, 21.0, 3.9, 3.2);
+    for (fx, tip) in [(36.5f32, 16.8f32), (39.0, 16.4), (41.5, 16.8)] {
+        d = d.min(sd_segment(x, y, fx, 20.0, fx, tip, 0.9));
+    }
+    d
+}
+
+fn sleep_z_distance(px: f32, py: f32) -> f32 {
+    let mut d = sd_segment(px, py, 33.9, 7.3, 39.1, 7.3, 0.55);
+    d = d.min(sd_segment(px, py, 39.1, 7.3, 33.9, 12.1, 0.55));
+    d.min(sd_segment(px, py, 33.9, 12.1, 39.1, 12.1, 0.55))
+}
+
+/// Distance to the awake face and, while dozing, to the drifting Z.
+fn mascot_parts(px: f32, py: f32, mood: MascotMood, phase: usize) -> (f32, f32) {
+    match mood {
+        MascotMood::Open => {
+            let eyes = sd_stadium(px, py, 16.0, 19.2, 2.8, 5.3, 2.8)
+                .min(sd_stadium(px, py, 28.0, 19.2, 2.8, 5.3, 2.8));
+            (eyes.min(paw_distance(px, py, 0.0, 0.0)), f32::MAX)
+        }
+        MascotMood::Waving => {
+            let dx = [0.0, -1.1, 0.0, 1.1][phase & 3];
+            let dy = [0.0, -0.8, -1.6, -0.8][phase & 3];
+            let eyes = happy_eye_distance(px, py, 16.0).min(happy_eye_distance(px, py, 28.0));
+            (eyes.min(paw_distance(px, py, dx, dy - 6.2)), f32::MAX)
+        }
+        MascotMood::Dozing => {
+            let eyes = sd_stadium(px, py, 16.0, 19.5, 3.0, 1.0, 1.0)
+                .min(sd_stadium(px, py, 28.0, 19.5, 3.0, 1.0, 1.0));
+            (eyes, sleep_z_distance(px, py))
         }
     }
 }
 
-unsafe fn mascot_happy_eye(hdc: HDC, cx: i32, cy: i32, color: u32) {
-    line(hdc, cx - 4, cy + 2, cx - 1, cy - 1, color, 2);
-    line(hdc, cx - 1, cy - 1, cx + 1, cy - 2, color, 2);
-    line(hdc, cx + 1, cy - 2, cx + 4, cy + 2, color, 2);
+fn smooth_edge(d: f32) -> f32 {
+    (0.5 - d).clamp(0.0, 1.0)
+}
+
+/// A gaussian falloff outside the shape, used for the bloom without a blur
+/// kernel: the glow follows the silhouette instead of turning into a box.
+fn bloom_falloff(d: f32, sigma: f32) -> f32 {
+    if d <= 0.0 {
+        1.0
+    } else {
+        (-(d * d) / (2.0 * sigma * sigma)).exp()
+    }
+}
+
+fn bloom_amount(d: f32, glow: f32) -> f32 {
+    (bloom_falloff(d, 1.5) * 0.55 + bloom_falloff(d, 3.0) * 0.45) * glow
 }
 
 #[derive(Clone, Copy)]
@@ -657,27 +720,75 @@ enum MascotMood {
     Waving,
 }
 
-unsafe fn draw_mascot(hdc: HDC, color: u32, dim: u32, mood: MascotMood, phase: usize) {
-    match mood {
-        MascotMood::Open => {
-            vcapsule(hdc, 23, 14, 4, 10, color);
-            vcapsule(hdc, 33, 14, 4, 10, color);
-            mascot_paw(hdc, 41, 11, color, 0);
-        }
-        MascotMood::Dozing => {
-            fill(hdc, 20, 14, 26, 16, color);
-            fill(hdc, 30, 14, 36, 16, color);
-            // A little drifting Z above the right eye.
-            line(hdc, 43, 7, 48, 7, dim, 1);
-            line(hdc, 48, 7, 43, 12, dim, 1);
-            line(hdc, 43, 12, 48, 12, dim, 1);
-        }
-        MascotMood::Waving => {
-            mascot_happy_eye(hdc, 23, 14, color);
-            mascot_happy_eye(hdc, 33, 14, color);
-            mascot_paw(hdc, 42, 8, color, phase);
+unsafe fn draw_mascot(
+    hdc: HDC,
+    x: i32,
+    color: u32,
+    mood: MascotMood,
+    phase: usize,
+    glow: f32,
+) {
+    let w = MASCOT_SPRITE_W as usize;
+    let h = MASCOT_H as usize;
+    let r = color & 0xFF;
+    let g = (color >> 8) & 0xFF;
+    let b = (color >> 16) & 0xFF;
+    let mut sprite = vec![0u32; w * h];
+    for py in 0..h {
+        for px in 0..w {
+            let (body_d, z_d) = mascot_parts(px as f32 + 0.5, py as f32 + 0.5, mood, phase);
+            let core = smooth_edge(body_d).max(smooth_edge(z_d) * 0.72);
+            let bloom = bloom_amount(body_d, glow).max(bloom_amount(z_d, glow) * 0.72);
+            // Fade the bloom into the transparent padding so the sprite's
+            // rectangular bounds never show up as a seam on the glass.
+            let edge = ((px as f32 + 0.5) / 4.0)
+                .min((w as f32 - 0.5 - px as f32) / 4.0)
+                .clamp(0.0, 1.0);
+            let out = (core + bloom * edge * (1.0 - core)).clamp(0.0, 1.0);
+            let ai = (out * 255.0).round() as u32;
+            sprite[py * w + px] = (ai << 24)
+                | ((r * ai / 255) << 16)
+                | ((g * ai / 255) << 8)
+                | (b * ai / 255);
         }
     }
+
+    let mut bmi = BITMAPINFO::default();
+    bmi.bmiHeader.biSize = std::mem::size_of::<BITMAPINFOHEADER>() as u32;
+    bmi.bmiHeader.biWidth = MASCOT_SPRITE_W;
+    bmi.bmiHeader.biHeight = -MASCOT_H;
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB.0;
+    let mut bits: *mut core::ffi::c_void = std::ptr::null_mut();
+    let Ok(dib) = CreateDIBSection(hdc, &bmi, DIB_RGB_COLORS, &mut bits, None, 0) else {
+        return;
+    };
+    let mem = CreateCompatibleDC(hdc);
+    let old = SelectObject(mem, HGDIOBJ(dib.0));
+    std::ptr::copy_nonoverlapping(sprite.as_ptr(), bits as *mut u32, sprite.len());
+    let bf = BLENDFUNCTION {
+        BlendOp: AC_SRC_OVER as u8,
+        BlendFlags: 0,
+        SourceConstantAlpha: 255,
+        AlphaFormat: AC_SRC_ALPHA as u8,
+    };
+    let _ = AlphaBlend(
+        hdc,
+        x - MASCOT_PAD,
+        0,
+        MASCOT_SPRITE_W,
+        MASCOT_H,
+        mem,
+        0,
+        0,
+        MASCOT_SPRITE_W,
+        MASCOT_H,
+        bf,
+    );
+    SelectObject(mem, old);
+    let _ = DeleteObject(HGDIOBJ(dib.0));
+    let _ = DeleteDC(mem);
 }
 
 unsafe fn play_triangle(hdc: HDC, cx: i32, cy: i32, color: u32) {
@@ -883,14 +994,29 @@ unsafe fn paint(hwnd: HWND) {
         let phase = wave
             .map(|w| ((w.start.elapsed().as_millis() / 160) % 4) as usize)
             .unwrap_or(0);
-        draw_mascot(hdc, p.text, p.dim, mood, phase);
+        // Center the mascot and clock as one group so the pill does not look
+        // left-heavy. The mascot sprite includes a little room for its bloom.
+        let text_w = text_width(hdc, f_clock, &clock);
+        let group_w = MASCOT_W + MASCOT_GAP + text_w;
+        let left = ((COLLAPSED_W - group_w) / 2).max(6);
+        let glow = match theme() {
+            Theme::Aurora => 0.50,
+            Theme::Dark => 0.38,
+            Theme::Light => 0.12,
+        };
+        draw_mascot(hdc, left, p.text, mood, phase, glow);
         draw_text(
             hdc,
             f_clock,
             p.text,
             &clock,
-            RECT { left: 0, top: 0, right: COLLAPSED_W, bottom: COLLAPSED_H },
-            DT_CENTER,
+            RECT {
+                left: left + MASCOT_W + MASCOT_GAP,
+                top: 0,
+                right: COLLAPSED_W,
+                bottom: COLLAPSED_H,
+            },
+            DT_LEFT,
         );
         let _ = DeleteObject(HGDIOBJ(f_clock.0));
         let _ = EndPaint(hwnd, &ps);
@@ -1769,7 +1895,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
             // Mascot: doze after a quiet spell, then wave on the next input.
             let idle = system_idle_ms();
             if current_wave().is_none() {
-                if idle < 700 {
+                if idle < 1500 {
                     if MASCOT_DOZING.swap(false, Ordering::Relaxed) {
                         start_wave(hwnd, 2400);
                     }

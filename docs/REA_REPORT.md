@@ -337,11 +337,12 @@ Self-description found in `.rdata`:
 A byte-preserving rebrand to **Neno** was produced from copies of the original
 artifacts (originals left untouched):
 
-- `E:\NusaSetup\renamed\NenoSetup.exe` (SHA-256 `10A80DBB5E483130974379FF16BBEC0FD713B6E916544C454EAA84156A7300DF`, 3,442,366 bytes) - packages the v1.0.3 reconstruction build (GUI subsystem, no console)
-- Embedded payload `neno.exe` (2,611,712 bytes, SHA-256 `397CC53D8F2B8821EFA6209D3769A39B2D3EF5A0CB35770B539F5568E3B44997`); verified by a silent install and hash comparison against `target\release\neno.exe`
-- `E:\NusaSetup\renamed\app\neno.exe` - same 2,611,712-byte payload and SHA-256 as above
-- Previous release: v1.0.2 installer 3,328,404 bytes, SHA-256 `89F5BF55224810E6B7FEF5BA79F90335903E52BFDA9D2E9B57AED41C222F43B7`; payload 2,496,512 bytes, SHA-256 `E43FB95193C7A03517A3AFC75DD5AACEDE06E1770B4E2267FD354AED824F9C0C`
-- Earlier release: v1.0.1 installer 3,319,777 bytes, SHA-256 `47F20F450A7EF8F273C6D92BAEDAEC68995362514F98D8B56EA1F1A2427080E8`; payload 2,460,672 bytes, SHA-256 `51CCDC2E7382F231B7AA48AB7A80BAA92A93FD3FAC7A47E2E425C0D21CBF75F4` (retained on the Releases page)
+- `E:\NusaSetup\renamed\NenoSetup.exe` (SHA-256 `B5B1C59BA7DD8C264530925C27FA667ED937AE1CA1BAAB1187A2E1E39E47E457`, 3,446,044 bytes) - packages the v1.0.4 reconstruction build (GUI subsystem, no console)
+- Embedded payload `neno.exe` (2,624,512 bytes, SHA-256 `2E455FBDA2390992A606DE10031AEEEE61FCF507AFA642FAB774FC3E1C23B1D8`); verified by a silent install and hash comparison against `target\release\neno.exe`
+- `E:\NusaSetup\renamed\app\neno.exe` - same 2,624,512-byte payload and SHA-256 as above
+- Previous release: v1.0.3 installer 3,442,366 bytes, SHA-256 `10A80DBB5E483130974379FF16BBEC0FD713B6E916544C454EAA84156A7300DF`; payload 2,611,712 bytes, SHA-256 `397CC53D8F2B8821EFA6209D3769A39B2D3EF5A0CB35770B539F5568E3B44997`
+- Earlier release: v1.0.2 installer 3,328,404 bytes, SHA-256 `89F5BF55224810E6B7FEF5BA79F90335903E52BFDA9D2E9B57AED41C222F43B7`; payload 2,496,512 bytes, SHA-256 `E43FB95193C7A03517A3AFC75DD5AACEDE06E1770B4E2267FD354AED824F9C0C`
+- v1.0.1 installer 3,319,777 bytes, SHA-256 `47F20F450A7EF8F273C6D92BAEDAEC68995362514F98D8B56EA1F1A2427080E8`; payload 2,460,672 bytes, SHA-256 `51CCDC2E7382F231B7AA48AB7A80BAA92A93FD3FAC7A47E2E425C0D21CBF75F4` (retained on the Releases page)
 
 Substitutions are same-length, so no offset shifts occur within uncompressed
 data: `Nusa`→`Neno`, `nusa`→`neno` in all casings, in both ASCII and UTF-16
@@ -405,6 +406,26 @@ come back"):
 - Verified live in Dark, Light and Aurora (open eyes + resting mitten, dozing
   slits + "Z", and the wake wave), and the installed v1.0.3 binary matches the
   release payload hash.
+
+### v1.0.4 - Cleaner mascot rendering
+
+The v1.0.4 build replaces the 1x pixel-art mascot with an antialiased sprite
+renderer while keeping the same states and timings:
+
+- Each frame is rasterized from signed-distance shapes into a 56x30
+  premultiplied BGRA sprite and composited with AlphaBlend. The eyes are 5.6x10.6
+  capsules, the resting paw is a separate rounded palm with three short fingers,
+  and the wave uses thin rounded `^ ^` eyes plus a raised paw.
+- A two-lobe gaussian bloom follows the silhouette instead of a 1px outline or
+  box blur; the bloom is faded into transparent padding so no rectangular seam
+  appears on the glass. Glow strength is 0.50 on Aurora, 0.38 on Dark and 0.12 on
+  Light.
+- The mascot and clock are centered as one 30px + 8px + text-width group; the
+  paw no longer touches the right eye.
+- Wake detection now uses a 1.5s idle window on the 1s timer, so the wave
+  reliably triggers after dozing instead of being missed by the old 700ms window.
+- Verified live in Aurora, Dark and Light (open, wave and doze), including the
+  installed v1.0.4 binary (hash matches the release payload).
 
 ## 6. Evidence and reproducibility
 
