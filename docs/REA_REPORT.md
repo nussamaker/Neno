@@ -337,11 +337,11 @@ Self-description found in `.rdata`:
 A byte-preserving rebrand to **Neno** was produced from copies of the original
 artifacts (originals left untouched):
 
-- `E:\NusaSetup\renamed\NenoSetup.exe` (SHA-256 `38DD1D60B982FA80FEC83B1714548531F77A27F9BCEAB4C1BA090A4BF286A7AF`, 3,363,790 bytes) - packages the v1.0.9 hover-reactive mascot build (GUI subsystem, no console); the setup icon is patched in place with the same 9-frame group
-- Embedded payload `neno.exe` (2,541,568 bytes, SHA-256 `B55E30B07FDC4DA0304EADD9C8C5B9B301D03872A604EC20876EB285016EF884`); verified by a silent install and hash comparison against `target\release\neno.exe`
-- `E:\NusaSetup\renamed\app\neno.exe` - same 2,541,568-byte payload and SHA-256 as above
-- Previous release: v1.0.8 installer 3,363,087 bytes, SHA-256 `47A0857EC480C5CFFFF36ACAA3E8DAF558F1D4E53DAA03B8D7784094FD31391E`; payload 2,540,544 bytes, SHA-256 `5796BD2421B763B3DA3AD5356D7F34D0B11A05391051AFF15099AC87211D6AC2`
-- v1.0.7 installer 3,357,339 bytes, SHA-256 `994B3FAC2787ADDE94C76997DD21A1E7158F6DC96852707037EA1B890AB3AB94`; payload 2,504,192 bytes, SHA-256 `47F963350C01086C4D7D0A94CF2BEC3ADBD89225BBBE60F8607C29425AC5B2BC`
+- `E:\NusaSetup\renamed\NenoSetup.exe` (SHA-256 `CA45A7B39FBC8089EEBD9E5F440D096D98D9F26535BB8ABBF40C75EEEE823E13`, 3,364,899 bytes) - packages the v1.0.10 cat-face build (GUI subsystem, no console); the setup icon is patched in place with the same 9-frame group
+- Embedded payload `neno.exe` (2,536,960 bytes, SHA-256 `5334B64A157286F2A695ED79DA4A2AB060BCFE5D211C26F3045FDF2BC04E1AE7`); verified by a silent install and hash comparison against `target\release\neno.exe`
+- `E:\NusaSetup\renamed\app\neno.exe` - same 2,536,960-byte payload and SHA-256 as above
+- Previous release: v1.0.9 installer 3,363,790 bytes, SHA-256 `38DD1D60B982FA80FEC83B1714548531F77A27F9BCEAB4C1BA090A4BF286A7AF`; payload 2,541,568 bytes, SHA-256 `B55E30B07FDC4DA0304EADD9C8C5B9B301D03872A604EC20876EB285016EF884`
+- v1.0.8 installer 3,363,087 bytes, SHA-256 `47A0857EC480C5CFFFF36ACAA3E8DAF558F1D4E53DAA03B8D7784094FD31391E`; payload 2,540,544 bytes, SHA-256 `5796BD2421B763B3DA3AD5356D7F34D0B11A05391051AFF15099AC87211D6AC2`
 - v1.0.5 installer 3,438,053 bytes, SHA-256 `812A7E1AC863D86511CDF5B03CFD8CB1415BC46A63EF90827EE1EBA53F426998`; payload 2,610,688 bytes, SHA-256 `434E59BA011F175A62B067D55959276CEEE4E840552FDC2C904C60410D5B13F5`
 - v1.0.4 installer 3,446,044 bytes, SHA-256 `B5B1C59BA7DD8C264530925C27FA667ED937AE1CA1BAAB1187A2E1E39E47E457`; payload 2,624,512 bytes, SHA-256 `2E455FBDA2390992A606DE10031AEEEE61FCF507AFA642FAB774FC3E1C23B1D8`
 - v1.0.3 installer 3,442,366 bytes, SHA-256 `10A80DBB5E483130974379FF16BBEC0FD713B6E916544C454EAA84156A7300DF`; payload 2,611,712 bytes, SHA-256 `397CC53D8F2B8821EFA6209D3769A39B2D3EF5A0CB35770B539F5568E3B44997`
@@ -521,6 +521,19 @@ keeping the app strictly black-and-white:
   still dozes after a minute away. Leaving resets the gaze to center.
 - Verified live: 65 seconds hovered and still open, 65 seconds away and dozing
   (`Z`), the wave on return, and the gaze shifting between the pill's edges.
+
+### v1.0.10 - Cat-face mascot and face-only idle pill
+
+- Replaced the abstract eyes-and-paw mascot with a white line-art cat face:
+  triangular ears, capsule eyes, nose, mouth, and whiskers, rasterized as a
+  signed-distance sprite with the same soft bloom. There is no separate paw.
+- The face carries the expressions: open eyes while awake, a wink plus a small
+  head bob during the greeting wave, and closed eyes while dozing.
+- After 1 minute without input the notch itself shrinks from 164 px to a 56 px
+  pill that shows only the sleeping cat face, with the clock hidden. Moving the
+  pointer into it restores the full pill and clock and plays the wave.
+- Verified live: awake face beside the clock, the 65-second shrink to the
+  face-only pill, hover wake and expand, the wink wave, and gaze following.
 
 ## 6. Evidence and reproducibility
 

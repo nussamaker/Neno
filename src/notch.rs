@@ -37,6 +37,11 @@ const COLLAPSED_H: i32 = 30;
 const COLLAPSED_BODY_W: i32 = 150;
 const COLLAPSED_SHOULDER: i32 = 7;
 const COLLAPSED_RADIUS: i32 = 16;
+// After a minute of quiet the pill shrinks to just the sleeping cat face.
+const DOZE_W: i32 = 56;
+const DOZE_BODY_W: i32 = 46;
+const DOZE_SHOULDER: i32 = 6;
+const DOZE_RADIUS: i32 = 15;
 const EXPANDED_W: i32 = 420;
 const EXPANDED_H: i32 = 140;
 const EXPANDED_SHOULDER: i32 = 17;
@@ -207,10 +212,27 @@ pub fn collapse() {
 fn layout(hwnd: HWND, expanded: bool) {
     unsafe {
         HOVER_ID.store(0, Ordering::Relaxed);
-        let (w, h) = if expanded {
-            (EXPANDED_WINDOW_W, EXPANDED_H)
+        if expanded {
+            MASCOT_DOZING.store(false, Ordering::Relaxed);
+        }
+        let (w, h, body_w, shoulder, radius) = if expanded {
+            (
+                EXPANDED_WINDOW_W,
+                EXPANDED_H,
+                EXPANDED_W,
+                EXPANDED_SHOULDER,
+                EXPANDED_RADIUS,
+            )
+        } else if MASCOT_DOZING.load(Ordering::Relaxed) {
+            (DOZE_W, COLLAPSED_H, DOZE_BODY_W, DOZE_SHOULDER, DOZE_RADIUS)
         } else {
-            (COLLAPSED_W, COLLAPSED_H)
+            (
+                COLLAPSED_W,
+                COLLAPSED_H,
+                COLLAPSED_BODY_W,
+                COLLAPSED_SHOULDER,
+                COLLAPSED_RADIUS,
+            )
         };
         let sw = GetSystemMetrics(SM_CXSCREEN);
         let _ = SetWindowPos(
@@ -222,11 +244,7 @@ fn layout(hwnd: HWND, expanded: bool) {
             h,
             SWP_NOACTIVATE | SWP_SHOWWINDOW,
         );
-        if expanded {
-            apply_region(hwnd, w, h, EXPANDED_W, EXPANDED_SHOULDER, EXPANDED_RADIUS);
-        } else {
-            apply_region(hwnd, w, h, COLLAPSED_BODY_W, COLLAPSED_SHOULDER, COLLAPSED_RADIUS);
-        }
+        apply_region(hwnd, w, h, body_w, shoulder, radius);
         EXPANDED.store(expanded, Ordering::Relaxed);
         if !expanded {
             *LAST_INSIDE.lock().unwrap() = None;
@@ -573,8 +591,11 @@ fn start_wave(hwnd: HWND, ms: u64) {
             until: now + Duration::from_millis(ms),
         });
     }
-    MASCOT_DOZING.store(false, Ordering::Relaxed);
+    let was_dozing = MASCOT_DOZING.swap(false, Ordering::Relaxed);
     unsafe {
+        if was_dozing && !EXPANDED.load(Ordering::Relaxed) {
+            layout(hwnd, false);
+        }
         SetTimer(hwnd, 4, 55, None);
         let _ = InvalidateRect(hwnd, None, false);
     }
@@ -582,28 +603,12 @@ fn start_wave(hwnd: HWND, ms: u64) {
 
 /// The mascot sprite is rasterized from signed-distance shapes with a soft
 /// bloom, then alpha-blended as one piece. Drawing it with 1px GDI primitives
-/// made the eyes and paw read as hard, separate blobs at this size.
+/// made the ears and eyes read as hard, separate blobs at this size.
 const MASCOT_W: i32 = 30;
 const MASCOT_PAD: i32 = 13;
 const MASCOT_SPRITE_W: i32 = MASCOT_W + MASCOT_PAD * 2;
 const MASCOT_H: i32 = 30;
 const MASCOT_GAP: i32 = 8;
-
-fn sd_stadium(
-    px: f32,
-    py: f32,
-    cx: f32,
-    cy: f32,
-    half_w: f32,
-    half_h: f32,
-    r: f32,
-) -> f32 {
-    let qx = (px - cx).abs() - (half_w - r);
-    let qy = (py - cy).abs() - (half_h - r);
-    let ox = qx.max(0.0);
-    let oy = qy.max(0.0);
-    (ox * ox + oy * oy).sqrt() + qx.max(qy).min(0.0) - r
-}
 
 fn sd_ellipse(px: f32, py: f32, cx: f32, cy: f32, rx: f32, ry: f32) -> f32 {
     let nx = (px - cx) / rx;
@@ -622,39 +627,93 @@ fn sd_segment(px: f32, py: f32, ax: f32, ay: f32, bx: f32, by: f32, r: f32) -> f
     (dx * dx + dy * dy).sqrt() - r
 }
 
-/// A rounded "^" eye, built as a stroked quadratic curve like Nusa's wake face.
-fn happy_eye_distance(px: f32, py: f32, cx: f32) -> f32 {
+/// Signed distance to a triangle, used for the ears and nose. The inside test
+/// is done with three cross products so points beyond a vertex cannot flip
+/// the sign the way a nearest-edge-only formula can.
+fn sd_triangle(
+    px: f32,
+    py: f32,
+    ax: f32,
+    ay: f32,
+    bx: f32,
+    by: f32,
+    cx: f32,
+    cy: f32,
+) -> f32 {
+    let cross = |ux: f32, uy: f32, vx: f32, vy: f32| ux * vy - uy * vx;
+    let c0 = cross(bx - ax, by - ay, px - ax, py - ay);
+    let c1 = cross(cx - bx, cy - by, px - bx, py - by);
+    let c2 = cross(ax - cx, ay - cy, px - cx, py - cy);
+    let inside = (c0 >= 0.0 && c1 >= 0.0 && c2 >= 0.0)
+        || (c0 <= 0.0 && c1 <= 0.0 && c2 <= 0.0);
+    let d = sd_segment(px, py, ax, ay, bx, by, 0.0)
+        .min(sd_segment(px, py, bx, by, cx, cy, 0.0))
+        .min(sd_segment(px, py, cx, cy, ax, ay, 0.0));
+    if inside {
+        -d
+    } else {
+        d
+    }
+}
+
+/// A closed eye: a smooth arc stroked with a thin black line. The arc bows
+/// down for sleep and up for the happy wave.
+fn cat_eye_arc(px: f32, py: f32, cx: f32, cy: f32, up: bool) -> f32 {
     let mut d = f32::MAX;
-    let mut prev = (cx - 2.8, 20.8);
-    for i in 1..=12 {
-        let t = i as f32 / 12.0;
+    let mut prev = (cx - 2.2, cy);
+    let control_y = if up { cy - 1.5 } else { cy + 1.2 };
+    for i in 1..=10 {
+        let t = i as f32 / 10.0;
         let mt = 1.0 - t;
-        let x = mt * mt * (cx - 2.8) + 2.0 * mt * t * cx + t * t * (cx + 2.8);
-        let y = mt * mt * 20.8 + 2.0 * mt * t * 14.8 + t * t * 20.8;
-        d = d.min(sd_segment(px, py, prev.0, prev.1, x, y, 0.62));
+        let x = mt * mt * (cx - 2.2) + 2.0 * mt * t * cx + t * t * (cx + 2.2);
+        let y = mt * mt * cy + 2.0 * mt * t * control_y + t * t * cy;
+        d = d.min(sd_segment(px, py, prev.0, prev.1, x, y, 0.55));
         prev = (x, y);
     }
     d
 }
 
-fn paw_distance(px: f32, py: f32, dx: f32, dy: f32) -> f32 {
-    let x = px - dx;
-    let y = py - dy;
-    let mut d = sd_ellipse(x, y, 39.0, 21.0, 3.9, 3.2);
-    for (fx, tip) in [(36.5f32, 16.8f32), (39.0, 16.4), (41.5, 16.8)] {
-        d = d.min(sd_segment(x, y, fx, 20.0, fx, tip, 0.9));
+/// Head, ears and whiskers of the cat face.
+fn cat_body_distance(px: f32, py: f32, bob: f32) -> f32 {
+    let y = py + bob;
+    let mut d = sd_ellipse(px, y, 28.0, 19.0, 11.8, 8.8);
+    d = d.min(sd_triangle(px, y, 16.5, 12.5, 18.6, 2.3, 26.5, 8.8));
+    d = d.min(sd_triangle(px, y, 39.5, 12.5, 37.4, 2.3, 29.5, 8.8));
+    for (x0, y0, x1, y1) in [
+        (16.5, 19.0, 11.6, 18.0),
+        (16.5, 20.6, 11.6, 20.8),
+        (39.5, 19.0, 44.4, 18.0),
+        (39.5, 20.6, 44.4, 20.8),
+    ] {
+        d = d.min(sd_segment(px, y, x0, y0, x1, y1, 0.45));
     }
     d
 }
 
-fn sleep_z_distance(px: f32, py: f32) -> f32 {
-    let mut d = sd_segment(px, py, 33.9, 7.3, 39.1, 7.3, 0.55);
-    d = d.min(sd_segment(px, py, 39.1, 7.3, 33.9, 12.1, 0.55));
-    d.min(sd_segment(px, py, 33.9, 12.1, 39.1, 12.1, 0.55))
+/// The black cut-outs that turn the white silhouette into a face.
+fn cat_feature_distance(px: f32, py: f32, mood: MascotMood, look: (f32, f32)) -> f32 {
+    let mut d = sd_triangle(px, py, 18.8, 9.6, 19.6, 4.8, 23.6, 8.6)
+        .min(sd_triangle(px, py, 37.2, 9.6, 36.4, 4.8, 32.4, 8.6));
+    let lx = look.0;
+    let ly = look.1;
+    d = d.min(match mood {
+        MascotMood::Open => sd_ellipse(px, py, 23.4 + lx, 17.7 + ly, 1.75, 2.4)
+            .min(sd_ellipse(px, py, 32.6 + lx, 17.7 + ly, 1.75, 2.4)),
+        MascotMood::Waving => cat_eye_arc(px, py, 23.4 + lx, 17.7 + ly, true)
+            .min(sd_ellipse(px, py, 32.6 + lx, 17.7 + ly, 1.75, 2.4)),
+        MascotMood::Dozing => cat_eye_arc(px, py, 23.4, 17.9, false)
+            .min(cat_eye_arc(px, py, 32.6, 17.9, false)),
+    });
+    let nose = sd_triangle(px, py, 26.8, 20.7, 29.2, 20.7, 28.0, 22.3);
+    let mouth = sd_segment(px, py, 28.0, 22.2, 28.0, 22.9, 0.45)
+        .min(sd_segment(px, py, 28.0, 22.9, 26.6, 23.7, 0.45))
+        .min(sd_segment(px, py, 28.0, 22.9, 29.4, 23.7, 0.45));
+    d.min(nose).min(mouth)
 }
 
-/// Distance to the awake face and, while dozing, to the drifting Z. `look`
-/// shifts the eyes and paw toward the pointer.
+/// Distance to the cat silhouette and, separately, to the black face
+/// cut-outs. `look` moves the eyes toward the pointer; the wave adds a
+/// small bob to the whole head.
 fn mascot_parts(
     px: f32,
     py: f32,
@@ -662,26 +721,14 @@ fn mascot_parts(
     phase: usize,
     look: (f32, f32),
 ) -> (f32, f32) {
-    let lx = px - look.0;
-    let ly = py - look.1;
-    match mood {
-        MascotMood::Open => {
-            let eyes = sd_stadium(lx, ly, 16.0, 19.2, 2.8, 5.3, 2.8)
-                .min(sd_stadium(lx, ly, 28.0, 19.2, 2.8, 5.3, 2.8));
-            (eyes.min(paw_distance(lx, ly, 0.0, 0.0)), f32::MAX)
-        }
-        MascotMood::Waving => {
-            let dx = [0.0, -1.1, 0.0, 1.1][phase & 3];
-            let dy = [0.0, -0.8, -1.6, -0.8][phase & 3];
-            let eyes = happy_eye_distance(lx, ly, 16.0).min(happy_eye_distance(lx, ly, 28.0));
-            (eyes.min(paw_distance(lx, ly, dx, dy - 6.2)), f32::MAX)
-        }
-        MascotMood::Dozing => {
-            let eyes = sd_stadium(px, py, 16.0, 19.5, 3.0, 1.0, 1.0)
-                .min(sd_stadium(px, py, 28.0, 19.5, 3.0, 1.0, 1.0));
-            (eyes, sleep_z_distance(px, py))
-        }
-    }
+    let bob = match mood {
+        MascotMood::Waving => [0.0, 0.4, 0.9, 0.4][phase & 3],
+        _ => 0.0,
+    };
+    (
+        cat_body_distance(px, py, bob),
+        cat_feature_distance(px, py + bob, mood, look),
+    )
 }
 
 fn smooth_edge(d: f32) -> f32 {
@@ -726,16 +773,17 @@ unsafe fn draw_mascot(
     let mut sprite = vec![0u32; w * h];
     for py in 0..h {
         for px in 0..w {
-            let (body_d, z_d) =
+            let (body_d, feature_d) =
                 mascot_parts(px as f32 + 0.5, py as f32 + 0.5, mood, phase, look);
-            let core = smooth_edge(body_d).max(smooth_edge(z_d) * 0.72);
-            let bloom = bloom_amount(body_d, glow).max(bloom_amount(z_d, glow) * 0.72);
+            let body = smooth_edge(body_d);
+            let core = body * (1.0 - smooth_edge(feature_d));
+            let bloom = bloom_amount(body_d, glow);
             // Fade the bloom into the transparent padding so the sprite's
             // rectangular bounds never show up as a seam on the glass.
             let edge = ((px as f32 + 0.5) / 4.0)
                 .min((w as f32 - 0.5 - px as f32) / 4.0)
                 .clamp(0.0, 1.0);
-            let out = (core + bloom * edge * (1.0 - core)).clamp(0.0, 1.0);
+            let out = (core + bloom * edge * (1.0 - body)).clamp(0.0, 1.0);
             let ai = (out * 255.0).round() as u32;
             sprite[py * w + px] = (ai << 24)
                 | ((r * ai / 255) << 16)
@@ -960,20 +1008,26 @@ unsafe fn paint(hwnd: HWND) {
     let expanded = EXPANDED.load(Ordering::Relaxed);
 
     if !expanded {
-        let pts = notch_points(
-            COLLAPSED_W,
-            COLLAPSED_H,
-            COLLAPSED_BODY_W,
-            COLLAPSED_SHOULDER,
-            COLLAPSED_RADIUS,
-        );
+        let dozing =
+            MASCOT_DOZING.load(Ordering::Relaxed) && !MASCOT_HOVER.load(Ordering::Relaxed);
+        let (w, body_w, shoulder, radius) = if dozing {
+            (DOZE_W, DOZE_BODY_W, DOZE_SHOULDER, DOZE_RADIUS)
+        } else {
+            (
+                COLLAPSED_W,
+                COLLAPSED_BODY_W,
+                COLLAPSED_SHOULDER,
+                COLLAPSED_RADIUS,
+            )
+        };
+        let pts = notch_points(w, COLLAPSED_H, body_w, shoulder, radius);
         filled_poly(hdc, &pts, p.bg);
         let (clock, _) = now_parts();
         let f_clock = make_font(17, FW_SEMIBOLD.0);
         let wave = current_wave();
         let mood = if wave.is_some() {
             MascotMood::Waving
-        } else if MASCOT_DOZING.load(Ordering::Relaxed) && !MASCOT_HOVER.load(Ordering::Relaxed) {
+        } else if dozing {
             MascotMood::Dozing
         } else {
             MascotMood::Open
@@ -981,30 +1035,38 @@ unsafe fn paint(hwnd: HWND) {
         let phase = wave
             .map(|w| ((w.start.elapsed().as_millis() / 160) % 4) as usize)
             .unwrap_or(0);
-        // Center the mascot and clock as one group so the pill does not look
-        // left-heavy. The mascot sprite includes a little room for its bloom.
-        let text_w = text_width(hdc, f_clock, &clock);
-        let group_w = MASCOT_W + MASCOT_GAP + text_w;
-        let left = ((COLLAPSED_W - group_w) / 2).max(6);
-        MASCOT_CX.store(left + MASCOT_W / 2, Ordering::Relaxed);
         let look = MASCOT_LOOK
             .lock()
             .map(|l| (l.0 as f32 / 10.0, l.1 as f32 / 10.0))
             .unwrap_or((0.0, 0.0));
-        draw_mascot(hdc, left, p.text, mood, phase, 0.38, look);
-        draw_text(
-            hdc,
-            f_clock,
-            p.text,
-            &clock,
-            RECT {
-                left: left + MASCOT_W + MASCOT_GAP,
-                top: 0,
-                right: COLLAPSED_W,
-                bottom: COLLAPSED_H,
-            },
-            DT_LEFT,
-        );
+        if dozing {
+            // After a minute of quiet the pill shrinks to just the sleeping
+            // cat face, centered in the small pill.
+            let left = (w - MASCOT_W) / 2;
+            MASCOT_CX.store(w / 2, Ordering::Relaxed);
+            draw_mascot(hdc, left, p.text, mood, 0, 0.38, (0.0, 0.0));
+        } else {
+            // Center the mascot and clock as one group so the pill does not
+            // look left-heavy. The mascot sprite includes room for the bloom.
+            let text_w = text_width(hdc, f_clock, &clock);
+            let group_w = MASCOT_W + MASCOT_GAP + text_w;
+            let left = ((w - group_w) / 2).max(6);
+            MASCOT_CX.store(left + MASCOT_W / 2, Ordering::Relaxed);
+            draw_mascot(hdc, left, p.text, mood, phase, 0.38, look);
+            draw_text(
+                hdc,
+                f_clock,
+                p.text,
+                &clock,
+                RECT {
+                    left: left + MASCOT_W + MASCOT_GAP,
+                    top: 0,
+                    right: w,
+                    bottom: COLLAPSED_H,
+                },
+                DT_LEFT,
+            );
+        }
         let _ = DeleteObject(HGDIOBJ(f_clock.0));
         let _ = EndPaint(hwnd, &ps);
         return;
@@ -1905,6 +1967,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
             if current_wave().is_none() {
                 if idle < 1500 {
                     if MASCOT_DOZING.swap(false, Ordering::Relaxed) {
+                        layout(hwnd, false);
                         start_wave(hwnd, 2400);
                     }
                 } else if idle > 60_000
@@ -1912,7 +1975,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                     && !MASCOT_HOVER.load(Ordering::Relaxed)
                 {
                     if !MASCOT_DOZING.swap(true, Ordering::Relaxed) {
-                        unsafe { let _ = InvalidateRect(hwnd, None, false); }
+                        layout(hwnd, false);
                     }
                 }
             }
