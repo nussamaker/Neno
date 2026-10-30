@@ -656,8 +656,66 @@ fn sd_triangle(
     }
 }
 
-/// A closed eye: a smooth arc stroked with a thin black line. The arc bows
-/// down for sleep and up for the happy wave.
+/// Signed distance to a rounded rectangle with a different radius per corner.
+/// The head is built from two of these so the crown is narrower than the
+/// cheeks, the way the app icon's head flares below the ears.
+fn sd_rounded_box(
+    px: f32,
+    py: f32,
+    cx: f32,
+    cy: f32,
+    hx: f32,
+    hy: f32,
+    r_tl: f32,
+    r_tr: f32,
+    r_br: f32,
+    r_bl: f32,
+) -> f32 {
+    let r = if px < cx {
+        if py < cy {
+            r_tl
+        } else {
+            r_bl
+        }
+    } else if py < cy {
+        r_tr
+    } else {
+        r_br
+    };
+    let qx = (px - cx).abs() - hx + r;
+    let qy = (py - cy).abs() - hy + r;
+    let ox = qx.max(0.0);
+    let oy = qy.max(0.0);
+    (ox * ox + oy * oy).sqrt() + qx.max(qy).min(0.0) - r
+}
+
+/// The lower half of the head is a superellipse, which gives the icon's
+/// broad, softly squared chin instead of an egg-shaped taper.
+fn sd_superellipse(
+    px: f32,
+    py: f32,
+    cx: f32,
+    cy: f32,
+    rx: f32,
+    ry: f32,
+    n: f32,
+) -> f32 {
+    let nx = ((px - cx) / rx).abs();
+    let ny = ((py - cy) / ry).abs();
+    ((nx.powf(n) + ny.powf(n)).powf(1.0 / n) - 1.0) * rx.min(ry)
+}
+
+/// A vertical capsule: a rounded box whose width is the cap diameter.
+fn sd_capsule(px: f32, py: f32, cx: f32, cy: f32, half_h: f32, r: f32) -> f32 {
+    let qx = (px - cx).abs() - r;
+    let qy = (py - cy).abs() - half_h;
+    let ox = qx.max(0.0);
+    let oy = qy.max(0.0);
+    (ox * ox + oy * oy).sqrt() + qx.max(qy).min(0.0)
+}
+
+/// A closed eye: a smooth arc stroked with a thin black line, used for the
+/// wink during the greeting wave.
 fn cat_eye_arc(px: f32, py: f32, cx: f32, cy: f32, up: bool) -> f32 {
     let mut d = f32::MAX;
     let mut prev = (cx - 2.2, cy);
@@ -673,42 +731,45 @@ fn cat_eye_arc(px: f32, py: f32, cx: f32, cy: f32, up: bool) -> f32 {
     d
 }
 
-/// Head, ears and whiskers of the cat face.
+/// The app-icon cat head: a narrower crown, a wider cheek band, a broad
+/// superellipse chin, two big rounded ears, and nothing else. No inner ears,
+/// nose, mouth, or whiskers, matching `assets\neno.ico`.
 fn cat_body_distance(px: f32, py: f32, bob: f32) -> f32 {
     let y = py + bob;
-    let mut d = sd_ellipse(px, y, 28.0, 19.0, 11.8, 8.8);
-    d = d.min(sd_triangle(px, y, 16.5, 12.5, 18.6, 2.3, 26.5, 8.8));
-    d = d.min(sd_triangle(px, y, 39.5, 12.5, 37.4, 2.3, 29.5, 8.8));
-    for (x0, y0, x1, y1) in [
-        (16.5, 19.0, 11.6, 18.0),
-        (16.5, 20.6, 11.6, 20.8),
-        (39.5, 19.0, 44.4, 18.0),
-        (39.5, 20.6, 44.4, 20.8),
+    let mut d = sd_rounded_box(px, y, 28.0, 10.0, 12.0, 2.0, 3.0, 3.0, 0.0, 0.0);
+    d = d.min(sd_rounded_box(
+        px, y, 28.0, 16.0, 13.0, 4.0, 0.0, 0.0, 0.0, 0.0,
+    ));
+    d = d.min(sd_superellipse(px, y, 28.0, 18.0, 11.8, 6.8, 3.0));
+
+    // Each ear is a concave-sided quad, built from two triangles plus a
+    // small round tip. The concave inner edge is what makes it read as the
+    // icon's broad, soft ear rather than a thin devil horn.
+    for ((tip_x, tip_y), (ax, ay), (mx, my), (bx, by)) in [
+        ((18.0, 3.6), (16.8, 8.0), (21.0, 6.2), (26.0, 7.7)),
+        ((38.0, 3.6), (39.2, 8.0), (35.0, 6.2), (30.0, 7.7)),
     ] {
-        d = d.min(sd_segment(px, y, x0, y0, x1, y1, 0.45));
+        d = d.min(sd_triangle(px, y, tip_x, tip_y, ax, ay, mx, my));
+        d = d.min(sd_triangle(px, y, mx, my, ax, ay, bx, by));
+        d = d.min(sd_ellipse(px, y, tip_x, tip_y, 1.0, 1.0));
     }
     d
 }
 
-/// The black cut-outs that turn the white silhouette into a face.
+/// The two black capsule eyes from the icon. They are the only cut-outs:
+/// they look toward the pointer while hovered, become a wink during the
+/// greeting wave, and stay as the icon's open capsules while dozing.
 fn cat_feature_distance(px: f32, py: f32, mood: MascotMood, look: (f32, f32)) -> f32 {
-    let mut d = sd_triangle(px, py, 18.8, 9.6, 19.6, 4.8, 23.6, 8.6)
-        .min(sd_triangle(px, py, 37.2, 9.6, 36.4, 4.8, 32.4, 8.6));
     let lx = look.0;
     let ly = look.1;
-    d = d.min(match mood {
-        MascotMood::Open => sd_ellipse(px, py, 23.4 + lx, 17.7 + ly, 1.75, 2.4)
-            .min(sd_ellipse(px, py, 32.6 + lx, 17.7 + ly, 1.75, 2.4)),
-        MascotMood::Waving => cat_eye_arc(px, py, 23.4 + lx, 17.7 + ly, true)
-            .min(sd_ellipse(px, py, 32.6 + lx, 17.7 + ly, 1.75, 2.4)),
-        MascotMood::Dozing => cat_eye_arc(px, py, 23.4, 17.9, false)
-            .min(cat_eye_arc(px, py, 32.6, 17.9, false)),
-    });
-    let nose = sd_triangle(px, py, 26.8, 20.7, 29.2, 20.7, 28.0, 22.3);
-    let mouth = sd_segment(px, py, 28.0, 22.2, 28.0, 22.9, 0.45)
-        .min(sd_segment(px, py, 28.0, 22.9, 26.6, 23.7, 0.45))
-        .min(sd_segment(px, py, 28.0, 22.9, 29.4, 23.7, 0.45));
-    d.min(nose).min(mouth)
+    let open = |cx: f32, cy: f32| sd_capsule(px, py, cx, cy, 3.6, 1.35);
+    match mood {
+        MascotMood::Open | MascotMood::Dozing => {
+            open(23.5 + lx, 14.3 + ly).min(open(32.5 + lx, 14.3 + ly))
+        }
+        MascotMood::Waving => open(23.5 + lx, 14.3 + ly)
+            .min(cat_eye_arc(px, py, 32.5 + lx, 14.3 + ly, true)),
+    }
 }
 
 /// Distance to the cat silhouette and, separately, to the black face
@@ -1044,7 +1105,7 @@ unsafe fn paint(hwnd: HWND) {
             // cat face, centered in the small pill.
             let left = (w - MASCOT_W) / 2;
             MASCOT_CX.store(w / 2, Ordering::Relaxed);
-            draw_mascot(hdc, left, p.text, mood, 0, 0.38, (0.0, 0.0));
+            draw_mascot(hdc, left, p.text, mood, 0, 0.0, (0.0, 0.0));
         } else {
             // Center the mascot and clock as one group so the pill does not
             // look left-heavy. The mascot sprite includes room for the bloom.
@@ -1052,7 +1113,7 @@ unsafe fn paint(hwnd: HWND) {
             let group_w = MASCOT_W + MASCOT_GAP + text_w;
             let left = ((w - group_w) / 2).max(6);
             MASCOT_CX.store(left + MASCOT_W / 2, Ordering::Relaxed);
-            draw_mascot(hdc, left, p.text, mood, phase, 0.38, look);
+            draw_mascot(hdc, left, p.text, mood, phase, 0.0, look);
             draw_text(
                 hdc,
                 f_clock,
