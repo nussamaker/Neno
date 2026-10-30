@@ -4,137 +4,43 @@ use windows::Win32::UI::Shell::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CreatePopupMenu, AppendMenuW, TrackPopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu,
-    DispatchMessageW, GetMessageW, PostQuitMessage, RegisterClassExW, TranslateMessage,
-    CS_HREDRAW, CS_VREDRAW, HICON, MSG, TPM_LEFTALIGN, TPM_BOTTOMALIGN, WM_COMMAND, WM_DESTROY,
-    WM_RBUTTONUP, WM_USER, WNDCLASSEXW, WS_OVERLAPPED, MF_STRING,
+    DispatchMessageW, GetMessageW, GetSystemMetrics, PostQuitMessage, RegisterClassExW,
+    TranslateMessage, CS_HREDRAW, CS_VREDRAW, HICON, MSG, SM_CXSMICON, SM_CYSMICON,
+    TPM_LEFTALIGN, TPM_BOTTOMALIGN, WM_COMMAND, WM_DESTROY, WM_RBUTTONUP, WM_USER, WNDCLASSEXW,
+    WS_OVERLAPPED, MF_STRING,
 };
 use windows::core::PCWSTR;
 
-/// Paint the Neno mark (dark disc, green ring, white sparkle) into a 32x32 icon.
-fn app_icon() -> windows::Win32::UI::WindowsAndMessaging::HICON {
-    use windows::Win32::Foundation::{COLORREF, RECT};
-    use windows::Win32::Graphics::Gdi::{
-        CreateBitmap, CreateCompatibleDC, CreateDIBSection, CreatePen, CreateSolidBrush, DeleteDC,
-        DeleteObject, Ellipse, FillRect, GetDC, GetStockObject, HGDIOBJ, Polygon, ReleaseDC,
-        SelectObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, NULL_BRUSH, NULL_PEN,
-        PS_SOLID,
-    };
-    use windows::Win32::UI::WindowsAndMessaging::{CreateIconIndirect, ICONINFO};
-
-    unsafe {
-        let size = 32i32;
-        let screen = GetDC(None);
-        let bmi = BITMAPINFO {
-            bmiHeader: BITMAPINFOHEADER {
-                biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
-                biWidth: size,
-                biHeight: -size, // top-down
-                biPlanes: 1,
-                biBitCount: 32,
-                biCompression: BI_RGB.0,
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-        let mut bits: *mut core::ffi::c_void = std::ptr::null_mut();
-        let Ok(color) = CreateDIBSection(screen, &bmi, DIB_RGB_COLORS, &mut bits, None, 0) else {
-            let _ = ReleaseDC(None, screen);
-            return Default::default();
-        };
-        let dc = CreateCompatibleDC(screen);
-
-        // Transparent black backdrop, then the dark disc.
-        let bg = CreateSolidBrush(COLORREF(0));
-        let rc = RECT { left: 0, top: 0, right: size, bottom: size };
-        FillRect(dc, &rc, bg);
-        let _ = DeleteObject(HGDIOBJ(bg.0));
-
-        let old_bitmap = SelectObject(dc, HGDIOBJ(color.0));
-        let disc = CreateSolidBrush(COLORREF(0x000A0A0A));
-        let old_brush = SelectObject(dc, HGDIOBJ(disc.0));
-        let old_pen = SelectObject(dc, GetStockObject(NULL_PEN));
-        let _ = Ellipse(dc, 1, 1, size - 1, size - 1);
-        SelectObject(dc, old_pen);
-        SelectObject(dc, old_brush);
-        let _ = DeleteObject(HGDIOBJ(disc.0));
-
-        // Green ring.
-        let ring_pen = CreatePen(PS_SOLID, 2, COLORREF(0x0058D130));
-        SelectObject(dc, HGDIOBJ(ring_pen.0));
-        SelectObject(dc, GetStockObject(NULL_BRUSH));
-        let _ = Ellipse(dc, 6, 6, size - 6, size - 6);
-        SelectObject(dc, old_brush);
-        let _ = DeleteObject(HGDIOBJ(ring_pen.0));
-
-        // White sparkle, matching the notch brand mark.
-        let cx = 16;
-        let cy = 16;
-        let sparkle = [
-            windows::Win32::Foundation::POINT { x: cx, y: cy - 8 },
-            windows::Win32::Foundation::POINT { x: cx + 2, y: cy - 2 },
-            windows::Win32::Foundation::POINT { x: cx + 4, y: cy },
-            windows::Win32::Foundation::POINT { x: cx + 2, y: cy + 2 },
-            windows::Win32::Foundation::POINT { x: cx, y: cy + 8 },
-            windows::Win32::Foundation::POINT { x: cx - 2, y: cy + 2 },
-            windows::Win32::Foundation::POINT { x: cx - 4, y: cy },
-            windows::Win32::Foundation::POINT { x: cx - 2, y: cy - 2 },
-        ];
-        let sparkle_brush = CreateSolidBrush(COLORREF(0x00FFFFFF));
-        let sparkle_pen = CreatePen(PS_SOLID, 1, COLORREF(0x00FFFFFF));
-        let ob = SelectObject(dc, HGDIOBJ(sparkle_brush.0));
-        let op = SelectObject(dc, HGDIOBJ(sparkle_pen.0));
-        let _ = Polygon(dc, &sparkle);
-        SelectObject(dc, op);
-        SelectObject(dc, ob);
-        let _ = DeleteObject(HGDIOBJ(sparkle_pen.0));
-        let _ = DeleteObject(HGDIOBJ(sparkle_brush.0));
-
-        SelectObject(dc, old_bitmap);
-        let _ = DeleteDC(dc);
-        let _ = ReleaseDC(None, screen);
-
-        // Round alpha mask so the icon has soft edges on the taskbar.
-        let px = bits as *mut u8;
-        for y in 0..size {
-            for x in 0..size {
-                let dx = x as f32 + 0.5 - 16.0;
-                let dy = y as f32 + 0.5 - 16.0;
-                let d = (dx * dx + dy * dy).sqrt();
-                let a = ((15.4 - d).clamp(0.0, 1.0) * 255.0) as u8;
-                *px.add(((y * size + x) * 4 + 3) as usize) = a;
-            }
-        }
-
-        let zero_mask = vec![0u8; 4 * 32];
-        let mask = CreateBitmap(size, size, 1, 1, Some(zero_mask.as_ptr() as *const _));
-        let info = ICONINFO {
-            fIcon: windows::Win32::Foundation::BOOL(1),
-            xHotspot: 0,
-            yHotspot: 0,
-            hbmMask: mask,
-            hbmColor: color,
-        };
-        let icon = CreateIconIndirect(&info).unwrap_or_default();
-        let _ = DeleteObject(HGDIOBJ(mask.0));
-        let _ = DeleteObject(HGDIOBJ(color.0));
-        icon
-    }
-}
-
 /// The character icon embedded in the executable by build.rs.
+///
+/// Ask for the notification area's actual small-icon size so Windows uses the
+/// hand-tuned frame for the current DPI (16 at 100%, 20 at 125%, 24 at 150%,
+/// 32 at 200%) instead of downscaling the 32 px frame.
 fn resource_icon() -> Option<HICON> {
     use windows::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows::Win32::UI::WindowsAndMessaging::{LoadImageW, IMAGE_ICON, LR_DEFAULTCOLOR};
     unsafe {
         let module = GetModuleHandleW(None).ok()?;
+        let cx = GetSystemMetrics(SM_CXSMICON).max(16);
+        let cy = GetSystemMetrics(SM_CYSMICON).max(16);
         let handle = LoadImageW(
             HINSTANCE(module.0),
             PCWSTR(1 as *const u16),
             IMAGE_ICON,
-            32,
-            32,
+            cx,
+            cy,
             LR_DEFAULTCOLOR,
         )
+        .or_else(|_| {
+            LoadImageW(
+                HINSTANCE(module.0),
+                PCWSTR(1 as *const u16),
+                IMAGE_ICON,
+                32,
+                32,
+                LR_DEFAULTCOLOR,
+            )
+        })
         .ok()?;
         if handle.0.is_null() {
             None
@@ -209,12 +115,8 @@ impl TrayIcon {
 
             use windows::Win32::UI::WindowsAndMessaging::LoadIconW;
             use windows::Win32::UI::WindowsAndMessaging::IDI_APPLICATION;
-            // Prefer the embedded cat character; the painted mark is only a fallback.
+            // Prefer the embedded cat character; fall back to the system icon.
             let hicon = resource_icon()
-                .or_else(|| {
-                    let painted = app_icon();
-                    (!painted.is_invalid()).then_some(painted)
-                })
                 .unwrap_or_else(|| LoadIconW(None, IDI_APPLICATION).unwrap_or_default());
             let mut nid = NOTIFYICONDATAW {
                 cbSize: std::mem::size_of::<NOTIFYICONDATAW>() as u32,

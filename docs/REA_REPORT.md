@@ -337,10 +337,11 @@ Self-description found in `.rdata`:
 A byte-preserving rebrand to **Neno** was produced from copies of the original
 artifacts (originals left untouched):
 
-- `E:\NusaSetup\renamed\NenoSetup.exe` (SHA-256 `812A7E1AC863D86511CDF5B03CFD8CB1415BC46A63EF90827EE1EBA53F426998`, 3,438,053 bytes) - packages the v1.0.5 black-only build (GUI subsystem, no console)
-- Embedded payload `neno.exe` (2,610,688 bytes, SHA-256 `434E59BA011F175A62B067D55959276CEEE4E840552FDC2C904C60410D5B13F5`); verified by a silent install and hash comparison against `target\release\neno.exe`
-- `E:\NusaSetup\renamed\app\neno.exe` - same 2,610,688-byte payload and SHA-256 as above
-- Previous release: v1.0.4 installer 3,446,044 bytes, SHA-256 `B5B1C59BA7DD8C264530925C27FA667ED937AE1CA1BAAB1187A2E1E39E47E457`; payload 2,624,512 bytes, SHA-256 `2E455FBDA2390992A606DE10031AEEEE61FCF507AFA642FAB774FC3E1C23B1D8`
+- `E:\NusaSetup\renamed\NenoSetup.exe` (SHA-256 `2676F25276A2E3328E991295154693323F85DCDEECAEC5C16780E39CC0F95304`, 3,356,230 bytes) - packages the v1.0.6 black-tile icon build (GUI subsystem, no console); the setup icon is patched in place with the same 9-frame group
+- Embedded payload `neno.exe` (2,504,192 bytes, SHA-256 `6DC6248072F4F8A2EBBDD5FB2A1B2EFF84D97DCB745CE45F07F37D1C65418855`); verified by a silent install and hash comparison against `target\release\neno.exe`
+- `E:\NusaSetup\renamed\app\neno.exe` - same 2,504,192-byte payload and SHA-256 as above
+- Previous release: v1.0.5 installer 3,438,053 bytes, SHA-256 `812A7E1AC863D86511CDF5B03CFD8CB1415BC46A63EF90827EE1EBA53F426998`; payload 2,610,688 bytes, SHA-256 `434E59BA011F175A62B067D55959276CEEE4E840552FDC2C904C60410D5B13F5`
+- v1.0.4 installer 3,446,044 bytes, SHA-256 `B5B1C59BA7DD8C264530925C27FA667ED937AE1CA1BAAB1187A2E1E39E47E457`; payload 2,624,512 bytes, SHA-256 `2E455FBDA2390992A606DE10031AEEEE61FCF507AFA642FAB774FC3E1C23B1D8`
 - v1.0.3 installer 3,442,366 bytes, SHA-256 `10A80DBB5E483130974379FF16BBEC0FD713B6E916544C454EAA84156A7300DF`; payload 2,611,712 bytes, SHA-256 `397CC53D8F2B8821EFA6209D3769A39B2D3EF5A0CB35770B539F5568E3B44997`
 - Earlier release: v1.0.2 installer 3,328,404 bytes, SHA-256 `89F5BF55224810E6B7FEF5BA79F90335903E52BFDA9D2E9B57AED41C222F43B7`; payload 2,496,512 bytes, SHA-256 `E43FB95193C7A03517A3AFC75DD5AACEDE06E1770B4E2267FD354AED824F9C0C`
 - v1.0.1 installer 3,319,777 bytes, SHA-256 `47F20F450A7EF8F273C6D92BAEDAEC68995362514F98D8B56EA1F1A2427080E8`; payload 2,460,672 bytes, SHA-256 `51CCDC2E7382F231B7AA48AB7A80BAA92A93FD3FAC7A47E2E425C0D21CBF75F4` (retained on the Releases page)
@@ -352,7 +353,8 @@ data: `Nusa`→`Neno`, `nusa`→`neno` in all casings, in both ASCII and UTF-16
 identifiers (`Nusa`, `nusa.exe`, `{A03D4881-…}`, the original hashes) remain
 documented above as evidence. Scope applied: name + exe only — `AppId` GUID and
 publisher URL (`https://rama2555.github.io/nusa/`) intentionally unchanged;
-publisher name "Rama" and icon unchanged; no data migration.
+publisher name "Rama" unchanged; the original icon was kept until v1.0.6, when
+it was replaced with the black-tile mark; no data migration.
 
 The rename rebuild (see `re-analysis\build_neno_v2.py`) kept the embedded engine
 block byte-identical, recomputed the LZMA1 primary/secondary blocks and the
@@ -401,9 +403,9 @@ come back"):
 - The wave animates at 55 ms only while active and then stops; idle redraws stay
   on the existing 1 s timer, so the mascot adds no steady CPU cost.
 - Tray and executable icons now use the original cat character (small eyes on
-  the aurora badge), embedded from `assets/neno.ico` by `build.rs` as resource
-  ID 1; the tray loads it with `LoadImageW` and falls back to the painted mark
-  only if the resource is missing.
+  the aurora badge; replaced by the black-tile mark in v1.0.6), embedded from
+  `assets/neno.ico` by `build.rs` as resource ID 1; the tray loads it with
+  `LoadImageW` and falls back to the painted mark only if the resource is missing.
 - Verified live in Dark, Light and Aurora (open eyes + resting mitten, dozing
   slits + "Z", and the wake wave), and the installed v1.0.3 binary matches the
   release payload hash.
@@ -446,6 +448,31 @@ black-only, matching Nusa's original dark pill:
 - Verified live in black (wave, open, doze), the expanded card, and the Settings
   window, including the installed v1.0.5 binary (hash matches the release
   payload).
+
+### v1.0.6 - Black-tile app icon
+
+The v1.0.6 build replaces the last light/aurora artwork with a single black-only
+icon and makes the notification area use the frame drawn for its current DPI:
+
+- `assets/neno.ico` now contains 16, 20, 24, 32, 40, 48, 64, 128, and 256 px
+  frames. The mark is a black rounded-square tile (`#18181B` to `#070709`), a
+  white cat head (`#F5F5F7`), black negative-space capsule eyes, and a subtle
+  `#3A3A3E` inner rim.
+- The 16/20/24/32 px frames are drawn independently instead of downscaling the
+  256 px master: the eyes are thicker and wider-set, and the 16/20 px frames
+  omit the one-pixel rim so the face stays clean. The live 16 px tray capture is
+  pixel-identical to the source frame (same 10x9 white-cat core, 49 white
+  pixels) at 96 DPI.
+- `tray.rs` now calls `LoadImageW` with `GetSystemMetrics(SM_CXSMICON)` and
+  `SM_CYSMICON`, so 100/125/150/200% scaling loads the 16/20/24/32 px frame
+  instead of downscaling a fixed 32 px icon. The old painted green-ring
+  fallback was removed.
+- The setup icon is patched in place in `NenoSetup.exe` with the same nine-frame
+  group (`re-analysis\patch_installer_icon.py`); the appended Inno payload is
+  untouched and still verifies.
+- Verified live: installed v1.0.6 (Settings reports `Neno 1.0.6`), black notch,
+  new tray icon in the overflow, and the new shell icon on both `NenoSetup.exe`
+  and `neno.exe`.
 
 ## 6. Evidence and reproducibility
 
