@@ -18,6 +18,7 @@ use windows::Win32::Graphics::Gdi::{
     DT_END_ELLIPSIS, DT_LEFT, DT_RIGHT, DT_SINGLELINE, DT_VCENTER, FF_DONTCARE, FW_BOLD, FW_NORMAL,
     FW_SEMIBOLD, HDC, HFONT, HGDIOBJ, NULL_BRUSH, NULL_PEN, PAINTSTRUCT, PS_SOLID, TRANSPARENT,
 };
+use windows::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
 use windows::Win32::System::SystemInformation::{GetLocalTime, GetTickCount};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetLastInputInfo, TrackMouseEvent, LASTINPUTINFO, TME_LEAVE, TRACKMOUSEEVENT,
@@ -63,7 +64,7 @@ static HOVER_ID: AtomicUsize = AtomicUsize::new(0);
 static HOVER_TRACKING: AtomicBool = AtomicBool::new(false);
 
 /// The little mascot lives beside the clock in the closed notch. It dozes
-/// after a quiet spell and waves when the user comes back.
+/// after a minute of quiet and waves when the user comes back.
 #[derive(Clone, Copy)]
 struct MascotWave {
     start: Instant,
@@ -431,9 +432,7 @@ unsafe fn line(hdc: HDC, x1: i32, y1: i32, x2: i32, y2: i32, color: u32, width: 
     let _ = DeleteObject(HGDIOBJ(pen.0));
 }
 
-unsafe fn status_icon(hdc: HDC, cx: i32, cy: i32, color: u32, sparkle: u32) {
-    ring(hdc, cx, cy, 8, color, 3);
-    // Nusa's mark is a four-point sparkle, not a lightning bolt.
+unsafe fn sparkle_mark(hdc: HDC, cx: i32, cy: i32, color: u32) {
     let pts = [
         POINT { x: cx, y: cy - 4 },
         POINT { x: cx + 1, y: cy - 1 },
@@ -444,7 +443,95 @@ unsafe fn status_icon(hdc: HDC, cx: i32, cy: i32, color: u32, sparkle: u32) {
         POINT { x: cx - 2, y: cy },
         POINT { x: cx - 1, y: cy - 1 },
     ];
-    filled_poly(hdc, &pts, sparkle);
+    filled_poly(hdc, &pts, color);
+}
+
+unsafe fn bolt_mark(hdc: HDC, cx: i32, cy: i32, color: u32) {
+    let pts = [
+        POINT { x: cx + 2, y: cy - 5 },
+        POINT { x: cx - 2, y: cy },
+        POINT { x: cx, y: cy },
+        POINT { x: cx - 1, y: cy + 5 },
+        POINT { x: cx + 2, y: cy + 1 },
+        POINT { x: cx, y: cy + 1 },
+    ];
+    filled_poly(hdc, &pts, color);
+}
+
+/// Draw `frac` of a ring clockwise from 12 o'clock. GDI's Arc direction is
+/// awkward to reason about at this size, so the sweep is built from short
+/// segments instead.
+unsafe fn ring_arc(hdc: HDC, cx: i32, cy: i32, radius: i32, width: i32, color: u32, frac: f32) {
+    let frac = frac.clamp(0.0, 1.0);
+    if frac <= 0.0 {
+        return;
+    }
+    if frac >= 0.999 {
+        ring(hdc, cx, cy, radius, color, width);
+        return;
+    }
+    let pen = CreatePen(PS_SOLID, width, COLORREF(color));
+    let old_pen = SelectObject(hdc, HGDIOBJ(pen.0));
+    let steps = 72;
+    let filled = (frac * steps as f32).round() as i32;
+    let r = radius as f32;
+    for i in 0..filled {
+        let a0 = -std::f32::consts::FRAC_PI_2 + i as f32 * std::f32::consts::TAU / steps as f32;
+        let a1 = -std::f32::consts::FRAC_PI_2
+            + (i + 1) as f32 * std::f32::consts::TAU / steps as f32;
+        let _ = MoveToEx(
+            hdc,
+            cx + (r * a0.cos()).round() as i32,
+            cy + (r * a0.sin()).round() as i32,
+            None,
+        );
+        let _ = LineTo(
+            hdc,
+            cx + (r * a1.cos()).round() as i32,
+            cy + (r * a1.sin()).round() as i32,
+        );
+    }
+    SelectObject(hdc, old_pen);
+    let _ = DeleteObject(HGDIOBJ(pen.0));
+}
+
+#[derive(Clone, Copy)]
+struct Battery {
+    percent: Option<u8>,
+    charging: bool,
+    ac: bool,
+}
+
+fn battery_status() -> Battery {
+    let mut s = SYSTEM_POWER_STATUS::default();
+    let mut b = Battery { percent: None, charging: false, ac: false };
+    if unsafe { GetSystemPowerStatus(&mut s) }.is_err() {
+        return b;
+    }
+    b.ac = s.ACLineStatus == 1;
+    b.charging = s.BatteryFlag & 0x08 != 0;
+    if s.BatteryFlag & 0x80 == 0 && s.BatteryLifePercent <= 100 {
+        b.percent = Some(s.BatteryLifePercent);
+    }
+    b
+}
+
+/// The header badge: a battery gauge that fills with the charge level. While
+/// charging, a bolt replaces the sparkle; desktops without a battery keep the
+/// plain mark and show `AC`.
+unsafe fn battery_badge(hdc: HDC, cx: i32, cy: i32, p: &Palette, b: Battery) {
+    let frac = b.percent.map(|v| v as f32 / 100.0);
+    if let Some(frac) = frac {
+        ring(hdc, cx, cy, 8, p.faint, 3);
+        ring_arc(hdc, cx, cy, 8, 3, p.accent, frac);
+    } else {
+        ring(hdc, cx, cy, 8, p.dim, 3);
+    }
+    if b.charging {
+        bolt_mark(hdc, cx, cy, p.text);
+    } else {
+        sparkle_mark(hdc, cx, cy, p.text);
+    }
 }
 
 // ------------------------------------------------------------------ mascot
@@ -952,38 +1039,76 @@ unsafe fn paint_header(
     p: &Palette,
     f_date: HFONT,
     f_time: HFONT,
+    f_meta: HFONT,
     clock: &str,
     date: &str,
 ) {
+    let battery = battery_status();
+    let weather = WEATHER.lock().map(|w| w.clone()).unwrap_or_default();
+    let batt_text = match (battery.percent, battery.ac) {
+        (Some(pct), _) => format!("{}%", pct),
+        (None, true) => "AC".to_string(),
+        _ => String::new(),
+    };
     let date_w = text_width(hdc, f_date, date);
     let time_w = text_width(hdc, f_time, clock);
-    let total = 18 + 7 + date_w + 8 + time_w;
-    // Nusa's header group sits a touch right of the card's center line.
-    let start = (EXPANDED_W - total) / 2 + 10;
-    // Calibrated against the native capture: the icon and date sit a little
-    // further right than the slot math suggests, while the time stays anchored.
-    status_icon(hdc, start + 11, 18, p.dim, p.text);
+    let weather_w = if weather.is_empty() {
+        0
+    } else {
+        text_width(hdc, f_meta, &weather) + 8
+    };
+    let batt_w = if batt_text.is_empty() {
+        0
+    } else {
+        text_width(hdc, f_meta, &batt_text) + 8
+    };
+    let total = 18 + 7 + weather_w + date_w + 8 + time_w + batt_w;
+    // The album-art tile owns the left edge of every page, so centre the
+    // header in the space to its right instead of the full card.
+    let left = 112;
+    let right = EXPANDED_W - 14;
+    let start = left + ((right - left) - total).max(0) / 2;
+    battery_badge(hdc, start + 11, 18, p, battery);
+    let mut x = start + 28;
+    if !weather.is_empty() {
+        draw_text(
+            hdc,
+            f_meta,
+            p.dim,
+            &weather,
+            RECT { left: x, top: 6, right: x + weather_w, bottom: 30 },
+            DT_LEFT,
+        );
+        x += weather_w;
+    }
     draw_text(
         hdc,
         f_date,
         p.dim,
         date,
-        RECT { left: start + 28, top: 6, right: start + 28 + date_w + 20, bottom: 30 },
+        RECT { left: x, top: 6, right: x + date_w + 20, bottom: 30 },
         DT_LEFT,
     );
+    x += date_w + 8;
     draw_text(
         hdc,
         f_time,
         p.text,
         clock,
-        RECT {
-            left: start + 24 + date_w + 8,
-            top: 6,
-            right: start + 24 + date_w + 8 + time_w + 20,
-            bottom: 30,
-        },
+        RECT { left: x, top: 6, right: x + time_w + 20, bottom: 30 },
         DT_LEFT,
     );
+    x += time_w + 8;
+    if !batt_text.is_empty() {
+        draw_text(
+            hdc,
+            f_meta,
+            p.dim,
+            &batt_text,
+            RECT { left: x, top: 6, right: x + batt_w, bottom: 30 },
+            DT_LEFT,
+        );
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -998,7 +1123,7 @@ unsafe fn paint_media(
     clock: &str,
     date: &str,
 ) {
-    paint_header(hdc, p, f_date, f_time, clock, date);
+    paint_header(hdc, p, f_date, f_time, f_small, clock, date);
 
     // Album art placeholder, sized and placed like Nusa's 62px tile.
     let art = CreateSolidBrush(COLORREF(p.art));
@@ -1132,7 +1257,7 @@ unsafe fn paint_focus(
     clock: &str,
     date: &str,
 ) {
-    paint_header(hdc, p, f_date, f_time, clock, date);
+    paint_header(hdc, p, f_date, f_time, f_small, clock, date);
     let (remaining, phase, running) = FOCUS
         .get()
         .and_then(|m| m.lock().ok())
@@ -1186,7 +1311,7 @@ unsafe fn paint_water(
     clock: &str,
     date: &str,
 ) {
-    paint_header(hdc, p, f_date, f_time, clock, date);
+    paint_header(hdc, p, f_date, f_time, f_small, clock, date);
     let w = crate::water::WaterReminder::load();
     let pct = w.progress();
     let label = format!("{:.2} / {:.1} L", w.consumed_ml as f32 / 1000.0, w.goal_liters);
@@ -1226,7 +1351,7 @@ unsafe fn paint_todo(
     clock: &str,
     date: &str,
 ) {
-    paint_header(hdc, p, f_date, f_time, clock, date);
+    paint_header(hdc, p, f_date, f_time, f_tiny, clock, date);
     let list = crate::todo::TodoList::load();
     let open: Vec<_> = list.items.iter().filter(|i| !i.done).collect();
 
@@ -1330,7 +1455,7 @@ unsafe fn paint_shelf(
     clock: &str,
     date: &str,
 ) {
-    paint_header(hdc, p, f_date, f_time, clock, date);
+    paint_header(hdc, p, f_date, f_time, f_tiny, clock, date);
 
     // Drop zone: a soft card the user can throw files onto.
     let hot = hover_is(HOVER_SHELF_ZONE);
@@ -1759,7 +1884,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                     if MASCOT_DOZING.swap(false, Ordering::Relaxed) {
                         start_wave(hwnd, 2400);
                     }
-                } else if idle > 9000 && !EXPANDED.load(Ordering::Relaxed) {
+                } else if idle > 60_000 && !EXPANDED.load(Ordering::Relaxed) {
                     if !MASCOT_DOZING.swap(true, Ordering::Relaxed) {
                         unsafe { let _ = InvalidateRect(hwnd, None, false); }
                     }

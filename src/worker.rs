@@ -88,8 +88,10 @@ fn poll_media(last_key: &mut String) {
 
 /// Settings keys (in %APPDATA%\Neno\settings.txt):
 ///   weather_enabled=false   disable weather (no network call)
-///   weather_lat=<-90..90>   latitude  (default: London)
-///   weather_lon=<-180..180> longitude (default: London)
+///   weather_lat=<-90..90>   latitude  (overrides auto-location)
+///   weather_lon=<-180..180> longitude (overrides auto-location)
+/// Without explicit coordinates the worker asks ipwho.is once for an approximate
+/// location and caches it in location.txt for 30 days.
 /// Settings are re-read on every refresh, so edits apply within ~10 minutes.
 fn refresh_weather() {
     let s = settings::Settings::load();
@@ -103,10 +105,67 @@ fn refresh_weather() {
             .filter(|v| v.is_finite() && *v >= lo && *v <= hi)
             .unwrap_or(default)
     };
-    let lat = coord("weather_lat", -90.0, 90.0, DEFAULT_LAT);
-    let lon = coord("weather_lon", -180.0, 180.0, DEFAULT_LON);
+    let explicit = s.get("weather_lat").is_some() && s.get("weather_lon").is_some();
+    let (lat, lon) = if explicit {
+        (
+            coord("weather_lat", -90.0, 90.0, DEFAULT_LAT),
+            coord("weather_lon", -180.0, 180.0, DEFAULT_LON),
+        )
+    } else {
+        auto_location().unwrap_or((DEFAULT_LAT, DEFAULT_LON))
+    };
 
     if let Some(w) = weather::fetch_weather(lat, lon) {
-        notch::set_weather(&format!("{:.0}C {}", w.temperature, w.condition));
+        notch::set_weather(&format!("{:.0}°C {}", w.temperature, w.condition));
     }
+}
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+const LOCATION_TTL: u64 = 30 * 24 * 60 * 60;
+
+/// Approximate the user's coordinates from their public IP, cached for a month
+/// so the service is contacted at most once per location change.
+fn auto_location() -> Option<(f64, f64)> {
+    let path = crate::state::appdata_dir().join("location.txt");
+    if let Ok(txt) = std::fs::read_to_string(&path) {
+        let mut lat = f64::NAN;
+        let mut lon = f64::NAN;
+        let mut ts = 0u64;
+        for line in txt.lines() {
+            if let Some(v) = line.strip_prefix("lat=") {
+                lat = v.parse().unwrap_or(f64::NAN);
+            } else if let Some(v) = line.strip_prefix("lon=") {
+                lon = v.parse().unwrap_or(f64::NAN);
+            } else if let Some(v) = line.strip_prefix("ts=") {
+                ts = v.parse().unwrap_or(0);
+            }
+        }
+        if lat.is_finite()
+            && lon.is_finite()
+            && now_secs().saturating_sub(ts) < LOCATION_TTL
+        {
+            return Some((lat, lon));
+        }
+    }
+
+    let resp = crate::network::http_agent().get("https://ipwho.is/").call().ok()?;
+    let body = resp.into_string().ok()?;
+    let json: serde_json::Value = serde_json::from_str(&body).ok()?;
+    if json.get("success").and_then(|v| v.as_bool()) != Some(true) {
+        return None;
+    }
+    let lat = json.get("latitude")?.as_f64()?;
+    let lon = json.get("longitude")?.as_f64()?;
+    if !(-90.0..=90.0).contains(&lat) || !(-180.0..=180.0).contains(&lon) {
+        return None;
+    }
+    let _ = std::fs::create_dir_all(crate::state::appdata_dir());
+    let _ = std::fs::write(&path, format!("lat={}\nlon={}\nts={}\n", lat, lon, now_secs()));
+    Some((lat, lon))
 }

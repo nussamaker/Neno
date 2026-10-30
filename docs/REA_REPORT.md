@@ -337,10 +337,11 @@ Self-description found in `.rdata`:
 A byte-preserving rebrand to **Neno** was produced from copies of the original
 artifacts (originals left untouched):
 
-- `E:\NusaSetup\renamed\NenoSetup.exe` (SHA-256 `994B3FAC2787ADDE94C76997DD21A1E7158F6DC96852707037EA1B890AB3AB94`, 3,357,339 bytes) - packages the v1.0.7 silver-accent build (GUI subsystem, no console); the setup icon is patched in place with the same 9-frame group
-- Embedded payload `neno.exe` (2,504,192 bytes, SHA-256 `47F963350C01086C4D7D0A94CF2BEC3ADBD89225BBBE60F8607C29425AC5B2BC`); verified by a silent install and hash comparison against `target\release\neno.exe`
-- `E:\NusaSetup\renamed\app\neno.exe` - same 2,504,192-byte payload and SHA-256 as above
-- Previous release: v1.0.6 installer 3,356,230 bytes, SHA-256 `2676F25276A2E3328E991295154693323F85DCDEECAEC5C16780E39CC0F95304`; payload 2,504,192 bytes, SHA-256 `6DC6248072F4F8A2EBBDD5FB2A1B2EFF84D97DCB745CE45F07F37D1C65418855`
+- `E:\NusaSetup\renamed\NenoSetup.exe` (SHA-256 `47A0857EC480C5CFFFF36ACAA3E8DAF558F1D4E53DAA03B8D7784094FD31391E`, 3,363,087 bytes) - packages the v1.0.8 battery/weather/doze build (GUI subsystem, no console); the setup icon is patched in place with the same 9-frame group
+- Embedded payload `neno.exe` (2,540,544 bytes, SHA-256 `5796BD2421B763B3DA3AD5356D7F34D0B11A05391051AFF15099AC87211D6AC2`); verified by a silent install and hash comparison against `target\release\neno.exe`
+- `E:\NusaSetup\renamed\app\neno.exe` - same 2,540,544-byte payload and SHA-256 as above
+- Previous release: v1.0.7 installer 3,357,339 bytes, SHA-256 `994B3FAC2787ADDE94C76997DD21A1E7158F6DC96852707037EA1B890AB3AB94`; payload 2,504,192 bytes, SHA-256 `47F963350C01086C4D7D0A94CF2BEC3ADBD89225BBBE60F8607C29425AC5B2BC`
+- v1.0.6 installer 3,356,230 bytes, SHA-256 `2676F25276A2E3328E991295154693323F85DCDEECAEC5C16780E39CC0F95304`; payload 2,504,192 bytes, SHA-256 `6DC6248072F4F8A2EBBDD5FB2A1B2EFF84D97DCB745CE45F07F37D1C65418855`
 - v1.0.5 installer 3,438,053 bytes, SHA-256 `812A7E1AC863D86511CDF5B03CFD8CB1415BC46A63EF90827EE1EBA53F426998`; payload 2,610,688 bytes, SHA-256 `434E59BA011F175A62B067D55959276CEEE4E840552FDC2C904C60410D5B13F5`
 - v1.0.4 installer 3,446,044 bytes, SHA-256 `B5B1C59BA7DD8C264530925C27FA667ED937AE1CA1BAAB1187A2E1E39E47E457`; payload 2,624,512 bytes, SHA-256 `2E455FBDA2390992A606DE10031AEEEE61FCF507AFA642FAB774FC3E1C23B1D8`
 - v1.0.3 installer 3,442,366 bytes, SHA-256 `10A80DBB5E483130974379FF16BBEC0FD713B6E916544C454EAA84156A7300DF`; payload 2,611,712 bytes, SHA-256 `397CC53D8F2B8821EFA6209D3769A39B2D3EF5A0CB35770B539F5568E3B44997`
@@ -493,6 +494,23 @@ keeping the app strictly black-and-white:
 - Verified live: installed v1.0.7 (Settings reports `Neno 1.0.7`), silver ON
   pills with black labels, 62% water progress, a checked to-do item, and the
   expanded focus and water pages.
+
+### v1.0.8 - Battery gauge, header weather, 1-minute doze
+
+- The header badge is now a live battery gauge: the ring fills clockwise from
+  12 o'clock to the charge level, a bolt replaces the sparkle while charging,
+  and the percentage sits beside the clock. Systems without a battery keep the
+  sparkle and show `AC`.
+- Weather is now drawn in the expanded header next to the date and time when it
+  is enabled; it had been fetched and stored but never rendered. Without
+  explicit `weather_lat`/`weather_lon`, the worker resolves an approximate
+  location from the public IP through ipwho.is and caches it in `location.txt`
+  for 30 days.
+- The mascot stays awake for 1 minute of idle before dozing (previously 9
+  seconds); the wake wave is unchanged.
+- Verified live: installed v1.0.8 (Settings reports `Neno 1.0.8`), battery gauge
+  at 100% with the charging bolt, local weather (`17°C Partly cloudy`), the
+  weather-off layout, a 66-second doze, and the wake wave.
 
 ## 6. Evidence and reproducibility
 
